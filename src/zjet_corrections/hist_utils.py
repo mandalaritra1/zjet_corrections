@@ -1,5 +1,6 @@
 # src/zjet_corrections/hist_utils.py
-
+import hist
+import numpy as np
 
 
 def fill_hist(hdict, name, **kwargs):
@@ -124,11 +125,11 @@ class util_binning :
         
         #self.mgen_axis = hist.axis.Variable( [0,2.5,5,7.5,10,15,20,30,40,50,60,70,80,90,100,125,150,175,200,225,250,275,300,325,350,1000], name="mgen", label=r"Mass [GeV]")
         
-        self.gen_binning = tunfold_binning( self.mgen_axis.edges, self.ptgen_axis.edges, False, False, False, False )
-        self.reco_binning = tunfold_binning( self.mreco_axis.edges, self.ptreco_axis.edges, False, False, False, False )
+        #self.gen_binning = tunfold_binning( self.mgen_axis.edges, self.ptgen_axis.edges, False, False, False, False )
+        #self.reco_binning = tunfold_binning( self.mreco_axis.edges, self.ptreco_axis.edges, False, False, False, False )
         
-        self.gen_axis = hist.axis.Regular(self.gen_binning.total_nbin, 0, self.gen_binning.total_nbin, name = "bin_gen", label = "Generator")
-        self.reco_axis =  hist.axis.Regular(self.reco_binning.total_nbin, 0, self.reco_binning.total_nbin, name = "bin_reco", label = "Detector")
+        #self.gen_axis = hist.axis.Regular(self.gen_binning.total_nbin, 0, self.gen_binning.total_nbin, name = "bin_gen", label = "Generator")
+        #self.reco_axis =  hist.axis.Regular(self.reco_binning.total_nbin, 0, self.reco_binning.total_nbin, name = "bin_reco", label = "Detector")
         
         self.dataset_axis = hist.axis.StrCategory([], growth=True, name="dataset", label="Primary dataset")
         self.dataset_axis = hist.axis.StrCategory([], growth=True, name="dataset", label="Primary dataset")

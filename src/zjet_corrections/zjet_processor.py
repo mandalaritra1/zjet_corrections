@@ -93,8 +93,8 @@ class QJetMassProcessor(processor.ProcessorABC):
         mcut_gen_g_axis = binning.mcut_gen_g_axis
         #### weight to check what is causing this
         
-        self.gen_binning = binning.gen_binning
-        self.reco_binning = binning.reco_binning
+        #self.gen_binning = binning.gen_binning
+        #self.reco_binning = binning.reco_binning
 
         self.hists = processor.dict_accumulator()
 
@@ -102,7 +102,7 @@ class QJetMassProcessor(processor.ProcessorABC):
             register_hist(self.hists, "ptjet_mjet_u_reco", [dataset_axis,channel_axis, ptreco_axis, mreco_axis, syst_axis])
             register_hist(self.hists, "ptjet_mjet_g_reco", [dataset_axis,channel_axis, ptreco_axis, mreco_axis, syst_axis])
 
-            if self.do_gen:
+            if self._do_gen:
                 register_hist(self.hists, "response_matrix_u", [dataset_axis, channel_axis, ptreco_axis, mreco_axis, ptgen_axis, mgen_axis, syst_axis])
                 register_hist(self.hists, "response_matrix_g", [dataset_axis, channel_axis, ptreco_axis, mreco_axis, ptgen_axis, mgen_axis, syst_axis])
 
@@ -134,25 +134,28 @@ class QJetMassProcessor(processor.ProcessorABC):
 
         sel = PackedSelection()
 
-        if (self._do_gen):
-            era = None
-            firstidx = filename.find( "store/mc/" )
-            fname2 = filename[firstidx:]
-            fname_toks = fname2.split("/")
-            year = fname_toks[ fname_toks.index("mc") + 1]
-            ht_bin = fname_toks[ fname_toks.index("mc") + 2]
+        # if (self._do_gen):
+        #     era = None
+        #     firstidx = filename.find( "store/mc/" )
+        #     fname2 = filename[firstidx:]
+        #     fname_toks = fname2.split("/")
+        #     year = fname_toks[ fname_toks.index("mc") + 1]
+        #     ht_bin = fname_toks[ fname_toks.index("mc") + 2]
 
-            ## Flag used for number of events
-            herwig = False
-            if 'herwig' in filename: herwig = True
-        else:
-            firstidx = filename.find( "store/data/" )
-            fname2 = filename[firstidx:]
-            fname_toks = fname2.split("/")
-            era = fname_toks[ fname_toks.index("data") + 1]
-            channel = fname_toks[ fname_toks.index('NANOAOD') - 1]
-            ht_bin = 'all'
-            
+        #     ## Flag used for number of events
+        #     herwig = False
+        #     if 'herwig' in filename: herwig = True
+        # else:
+        #     firstidx = filename.find( "store/data/" )
+        #     fname2 = filename[firstidx:]
+        #     fname_toks = fname2.split("/")
+        #     era = fname_toks[ fname_toks.index("data") + 1]
+        #     channel = fname_toks[ fname_toks.index('NANOAOD') - 1]
+        #     ht_bin = 'all'
+        year = '2018'
+        ht_bin = 'all'
+        herwig = False
+        channel = 'SingleMuon'
             # lumi_mask = self.lumimasks[IOV](events_all.run, events_all.luminosityBlock)
             # # print("RUN", events_all.run )
             # # print("Lumi block", events_all.luminosityBlock )
@@ -162,7 +165,7 @@ class QJetMassProcessor(processor.ProcessorABC):
 
         # Trigger selection
         events1 = events_all
-        if not self.do_gen:
+        if not self._do_gen:
             logging.info("Channel {}".format(channel))
             if "UL2016" in dataset: 
                 if channel == "SingleMuon":
@@ -187,9 +190,17 @@ class QJetMassProcessor(processor.ProcessorABC):
             sel.add("trigsel", trigsel)    
 
             logging.debug("Trigger Selection ", ak.sum(sel.require(trigsel = True)))
-
-        fill_hist(self.hists, "ptjet_mjet_u_reco", dataset = dataset, channel = channel, ptreco = events1.Jet.pt, mreco = events1.Jet.mass, syst = "nominal")
-        fill_hist(self.hists, "ptjet_mjet_g_reco", dataset = dataset, channel = channel, ptreco = events1.Jet.pt, mreco = events1.Jet.msoftdrop, syst = "nominal")
+        ptreco = ak.flatten(events1.FatJet.pt)
+        logging.debug(f"ptreco before cleaning: {ptreco}")
+        ptreco = ptreco[~ak.is_none(ptreco)]
+        logging.debug(f"ptreco after cleaning: {ptreco}")
+        mreco = ak.flatten(events1.FatJet.mass)
+        mreco = mreco[~ak.is_none(mreco)]
+        mreco_g = ak.flatten(events1.FatJet.msoftdrop)
+        
+        mreco_g = mreco_g[~ak.is_none(mreco_g)]
+        fill_hist(self.hists, "ptjet_mjet_u_reco", dataset = dataset, channel = channel, ptreco = ptreco, mreco = mreco, systematic = "nominal")
+        fill_hist(self.hists, "ptjet_mjet_g_reco", dataset = dataset, channel = channel, ptreco = ptreco, mreco = mreco_g, systematic = "nominal")
         return self.hists
 
     def postprocess(self, accumulator):
@@ -198,12 +209,13 @@ class QJetMassProcessor(processor.ProcessorABC):
 
         for hname in hname_list:
             h = accumulator[hname]
-            for ds in h.axes['dataset'].identifiers():
+            for ds in h.axes['dataset']:
                 if ds.startswith("SingleMuon") or ds.startswith("EGamma") or ds.startswith("SingleElectron"):
                     continue
                 else:
-                    xs = cross_sections[ds]
+                    xs = 6077.22  # DY NLO
                     sw = sumw[ds]
+                    self.lumi_fb = 59.74  # 2018 lumi
                     if xs is None:
                         print(f"[postprocess] WARNING: missing XS_PB for dataset '{name}'. Skipping normalization.")
                         continue
