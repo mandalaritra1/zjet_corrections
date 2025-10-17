@@ -16,15 +16,25 @@ from collections import defaultdict
 import gc
 import tokenize as tok
 import re
-import logging
+
 from coffea.lookup_tools.dense_lookup import dense_lookup
 from coffea.jetmet_tools import JetResolutionScaleFactor
 from coffea.jetmet_tools import FactorizedJetCorrector, JetCorrectionUncertainty
 from coffea.jetmet_tools import JECStack, CorrectedJetsFactory
 from .weight_class import Weights
 from .hist_utils import *
+from .smp_utils import *
 
-
+class Log:
+    def __init__(self, mode="info"):
+        self.mode = mode
+    def info(self, msg):
+        if self.mode in ["info", "debug"]:
+            print("[INFO]", msg)
+    def debug(self, msg):
+        if self.mode == "debug":
+            print("[DEBUG]", msg)
+        
 
 class QJetMassProcessor(processor.ProcessorABC):
     '''
@@ -43,11 +53,13 @@ class QJetMassProcessor(processor.ProcessorABC):
         self._do_gen = do_gen
         self._mode = mode
         self._debug = debug
+
+        self.lepptcuts = [40,29] # [ele, mu]
         
         if self._debug:
-            logging.basicConfig(level=logging.DEBUG)
+            self.logging = Log(mode="debug")
         else:
-            logging.basicConfig(level=logging.INFO)
+            self.logging = Log(mode="info")
 
         binning = util_binning()
 
@@ -105,6 +117,8 @@ class QJetMassProcessor(processor.ProcessorABC):
             if self._do_gen:
                 register_hist(self.hists, "response_matrix_u", [dataset_axis, channel_axis, ptreco_axis, mreco_axis, ptgen_axis, mgen_axis, syst_axis])
                 register_hist(self.hists, "response_matrix_g", [dataset_axis, channel_axis, ptreco_axis, mreco_axis, ptgen_axis, mgen_axis, syst_axis])
+                register_hist(self.hists, "ptjet_mjet_u_gen", [dataset_axis,channel_axis, ptgen_axis, mgen_axis, syst_axis])
+                register_hist(self.hists, "ptjet_mjet_g_gen", [dataset_axis,channel_axis, ptgen_axis, mgen_axis, syst_axis])
 
         
         self.hists["sumw"] = processor.defaultdict_accumulator(float)
@@ -119,9 +133,9 @@ class QJetMassProcessor(processor.ProcessorABC):
         t0 = time.time()
         dataset = events_all.metadata["dataset"]
         filename = events_all.metadata['filename']
-        logging.info(f"Starting processing for dataset: {dataset} and file: {filename}")
+        self.logging.info(f"Starting processing for dataset: {dataset} and file: {filename}")
 
-        logging.debug(f"Total events in chunk: {len(events_all)}")
+        self.logging.debug(f"Total events in chunk: {len(events_all)}")
 
         IOV = ('2016APV' if ( any(re.findall(r'APV',  dataset)) or any(re.findall(r'UL2016APV', dataset)))
                else '2018'    if ( any(re.findall(r'UL18', dataset)) or any(re.findall(r'UL2018',    dataset)))
@@ -132,7 +146,7 @@ class QJetMassProcessor(processor.ProcessorABC):
         self.hists["nev"][dataset] += len(events_all)
         self.hists["sumw"][dataset] += ak.sum(events_all.genWeight)
 
-        sel = PackedSelection()
+        sel = PackedSelection(dtype='uint64')
 
         # if (self._do_gen):
         #     era = None
@@ -166,45 +180,373 @@ class QJetMassProcessor(processor.ProcessorABC):
         # Trigger selection
         events1 = events_all
         if not self._do_gen:
-            logging.info("Channel {}".format(channel))
+            self.logging.info("Channel {}".format(channel))
             if "UL2016" in dataset: 
                 if channel == "SingleMuon":
                     trigsel = events1.HLT.IsoMu24  
                 else:
-                    logging.info("Doing {channel} in {dataset}")
+                    self.logging.info("Doing {channel} in {dataset}")
                     trigsel = events1.HLT.Ele27_WPTight_Gsf | events1.HLT.Photon175
             elif "UL2017" in dataset:
                 if channel == "SingleMuon":
                     trigsel = events1.HLT.IsoMu27  
                 else:
-                    logging.info(f"Doing {channel} in {dataset}")
+                    self.logging.info(f"Doing {channel} in {dataset}")
                     trigsel = events1.HLT.Ele35_WPTight_Gsf | events1.HLT.Photon200
             elif "UL2018" in dataset:
                 if channel == "SingleMuon":
                     trigsel = events1.HLT.IsoMu24  
                 else:
-                    logging.info("Doing {channel} in {dataset}")
+                    self.logging.info("Doing {channel} in {dataset}")
                     trigsel = events1.HLT.Ele32_WPTight_Gsf | events1.HLT.Photon200
             else:
                 raise Exception("Dataset is incorrect, should have 2016, 2017, 2018: ", dataset)
             sel.add("trigsel", trigsel)    
 
-            logging.debug("Trigger Selection ", ak.sum(sel.require(trigsel = True)))
-        ptreco = ak.flatten(events1.FatJet.pt)
-        logging.debug(f"ptreco before cleaning: {ptreco}")
-        ptreco = ptreco[~ak.is_none(ptreco)]
-        logging.debug(f"ptreco after cleaning: {ptreco}")
-        mreco = ak.flatten(events1.FatJet.mass)
-        mreco = mreco[~ak.is_none(mreco)]
-        mreco_g = ak.flatten(events1.FatJet.msoftdrop)
+            self.logging.debug("Trigger Selection ", ak.sum(sel.require(trigsel = True)))
+
+
+        events0 = events1 # this will happen when implememting JECs
+
+        weights = Weights(size = len(events0), storeIndividual = True) #initialize weights class
+
+        # Store GEN weights or ones based on Simulation/Data
+        if self._do_gen:
+            
+            
+            weights.add("genWeight", events0.genWeight * events0.L1PreFiringWeight.Nom)
+        else:
+            weights = Weights(size = len(events0), storeIndividual = True)
+            weights.add("unity", np.ones(len(events0)))
+
+
+            
+        #####################################
+        ### MET Filters ####################
+        #####################################
+
+        self.logging.info("Applying MET filters")
+
+        MET_filters = {'2016APV':["goodVertices",
+                            "globalSuperTightHalo2016Filter",
+                            "HBHENoiseFilter",
+                            "HBHENoiseIsoFilter",
+                            "EcalDeadCellTriggerPrimitiveFilter",
+                            "BadPFMuonFilter",
+                            "BadPFMuonDzFilter",
+                            "eeBadScFilter",
+                            "hfNoisyHitsFilter"],
+                '2016'   :["goodVertices",
+                            "globalSuperTightHalo2016Filter",
+                            "HBHENoiseFilter",
+                            "HBHENoiseIsoFilter",
+                            "EcalDeadCellTriggerPrimitiveFilter",
+                            "BadPFMuonFilter",
+                            "BadPFMuonDzFilter",
+                            "eeBadScFilter",
+                            "hfNoisyHitsFilter"],
+                '2017'   :["goodVertices",
+                            "globalSuperTightHalo2016Filter",
+                            "HBHENoiseFilter",
+                            "HBHENoiseIsoFilter",
+                            "EcalDeadCellTriggerPrimitiveFilter",
+                            "BadPFMuonFilter",
+                            "BadPFMuonDzFilter",
+                            "hfNoisyHitsFilter",
+                            "eeBadScFilter",
+                            "ecalBadCalibFilter"],
+                '2018'   :["goodVertices",
+                            "globalSuperTightHalo2016Filter",
+                            "HBHENoiseFilter",
+                            "HBHENoiseIsoFilter",
+                            "EcalDeadCellTriggerPrimitiveFilter",
+                            "BadPFMuonFilter",
+                            "BadPFMuonDzFilter",
+                            "hfNoisyHitsFilter",
+                            "eeBadScFilter",
+                            "ecalBadCalibFilter"]}
         
+
+
+        # GEN Selection
+        if self._do_gen:
+            self.logging.info("Entering GEN selection")
+
+            # Apply selection on GEN particles
+            # Apply different pt cuts for electrons and muons
+            is_electron = np.abs(events0.GenDressedLepton.pdgId) == 11
+            is_muon = np.abs(events0.GenDressedLepton.pdgId) == 13
+
+            pt_cut = (
+                (is_electron & (events0.GenDressedLepton.pt > self.lepptcuts[0])) |
+                (is_muon & (events0.GenDressedLepton.pt > self.lepptcuts[1]))
+            )
+
+            eta_cut = np.abs(events0.GenDressedLepton.eta) < 2.5
+
+            events0 = ak.with_field(
+                events0,
+                events0.GenDressedLepton[pt_cut & eta_cut],
+                "GenDressedLepton"
+            )
+
+            events0 = ak.with_field(
+                                events0,
+                                events0.GenJetAK8[(events0.GenJetAK8.pt > 200)
+                                            & (np.abs(events0.GenJetAK8.eta) < 2.5)
+                                ],
+                                "GenJetAK8"
+            )
+
+            sel.add("oneGenJet", 
+                    ak.sum( (events0.GenJetAK8.pt > 0) & (np.abs(events0.GenJetAK8.eta) < 2.5), axis=1 ) >= 1
+                )
+            sel.add("oneGenJet_pt200", 
+                    ak.sum( (events0.GenJetAK8.pt > 200) & (np.abs(events0.GenJetAK8.eta) < 2.5), axis=1 ) >= 1
+                )
+
+
+            z_gen = get_z_gen_selection(events0, sel, self.lepptcuts[0], self.lepptcuts[1], None, None)
+            z_ptcut_gen = ak.where( sel.all("twoGen_leptons") & ~ak.is_none(z_gen),  z_gen.pt > 90., False )
+            z_mcut_gen = ak.where( sel.all("twoGen_leptons") & ~ak.is_none(z_gen),  (z_gen.mass > 71.) & (z_gen.mass < 111), False )
+
+            sel.add("z_ptcut_gen", z_ptcut_gen)
+            sel.add("z_mcut_gen", z_mcut_gen)
+
+            ######## dr between two leptons ########
+            twoGen_ee_sel = sel.require(twoGen_ee = True)
+            twoGen_mm_sel = sel.require(twoGen_mm = True)
+
+
+            gen_jet, z_jet_dphi_gen = get_dphi( z_gen, events0.GenJetAK8 )
+            z_jet_dr_gen = gen_jet.delta_r(z_gen)
+
+            
+
+            #####################################
+            ### Gen event topology selection
+            #####################################        
+            z_pt_asym_gen = np.abs(z_gen.pt - gen_jet.pt) / (z_gen.pt + gen_jet.pt)
+            z_pt_frac_gen = gen_jet.pt / z_gen.pt
+            z_pt_asym_sel_gen =  z_pt_asym_gen < 0.3
+            z_jet_dphi_sel_gen = z_jet_dphi_gen > 1.57 #2.8 #np.pi * 0.5
+
+            sel.add("z_jet_dphi_sel_gen", z_jet_dphi_sel_gen)
+            sel.add("z_pt_asym_sel_gen", z_pt_asym_sel_gen)
+
+            # sel.add("z_jet_dphi_sel_gen_seq", sel.all("z_mcut_gen_seq", "z_jet_dphi_sel_gen") )
+            # sel.add( "z_pt_asym_sel_gen_seq", sel.all("z_jet_dphi_sel_gen_seq", "z_pt_asym_sel_gen") )
+
+            kinsel_gen = sel.require(twoGen_leptons=True,oneGenJet=True,z_ptcut_gen=True,z_mcut_gen=True)
+            sel.add("kinsel_gen", kinsel_gen)
+            toposel_gen = sel.require( z_pt_asym_sel_gen=True, z_jet_dphi_sel_gen=True)
+            sel.add("toposel_gen", toposel_gen)
+
+            
+
+        # RECO Selection
+        self.logging.info("Entering RECO selection")
+
+        # npv cut
+        sel.add('npv', events0.PV.npvsGood >0)
+
+        selectEvents = np.array([events0.Flag[MET_filters[IOV][i]] for i in range(len(MET_filters[IOV]))
+                        if MET_filters[IOV][i] in events0.Flag.fields])
+        selectEvents = np.logical_and.reduce(selectEvents, axis=0) ## a passing event should pass "ALL" the MET filters
+
+        if ak.sum(selectEvents) < 1 :
+            print("No event passed the MET filters.")
+            return self.hists
+
+        sel.add("MET", selectEvents)
+        sel.add("MET_seq", sel.all('npv', 'MET')) # This is RECO only
+
+        events0 = ak.with_field(
+                events0,
+                events0.Electron[(events0.Electron.pt > self.lepptcuts[0]) 
+                                & (np.abs(events0.Electron.eta) < 2.5) 
+                                & (events0.Electron.pfRelIso03_all < 0.25)  # supressing isolation cut here
+                                & (events0.Electron.cutBased > 3) ## TightId == 4 , mediumId == 3, looseId == 2
+                                & (events0.Electron.dz < 0.2) ## dz < 0.2 cm to prevent pileup
+                ],
+                "Electron"
+            )
+
+            
+
+            
+
+            
+        events0 = ak.with_field(
+                events0,
+                events0.Muon[(events0.Muon.pt > self.lepptcuts[1]) 
+                            &(np.abs(events0.Muon.eta) < 2.5)
+                            &(events0.Muon.pfIsoId > 1) #medium iso, pfIso04 < 0.2 , 2 = loose, 3 = medium # supressing isolation cut here
+                            #&(events0.Muon.miniIsoId > 1)
+                            &(events0.Muon.mediumId	 == True)
+                            & (events0.Muon.dz < 0.2) ## dz < 0.2 cm to prevent pileup
+                            #&(events0.Muon.looseId	 == True)
+                
+                ],
+                "Muon"
+            )
+
+        z_reco = get_z_reco_selection(events0, sel, self.lepptcuts[0], self.lepptcuts[1], None, None)
+        z_ptcut_reco = z_reco.pt > 90
+        z_mcut_reco = (z_reco.mass > 71.) & (z_reco.mass < 111.)
+        sel.add("z_ptcut_reco", z_ptcut_reco & (sel.require(twoReco_leptons = True) ))
+        sel.add("z_mcut_reco", z_mcut_reco & (sel.require(twoReco_leptons = True) ))
+
+
+        #### dr reco plots ###
+
+        twoReco_ee_sel = sel.require(twoReco_ee = True)
+        twoReco_mm_sel = sel.require(twoReco_mm = True)
+        twoReco_ll_sel = sel.require(twoReco_leptons = True)
+
+
+        presort_recojets = events0.FatJet[
+             (events0.FatJet.mass > 0) 
+            &(events0.FatJet.pt > 0) 
+            &(np.abs(events0.FatJet.eta) < 2.5) 
+            &(events0.FatJet.jetId == 6) 
+        ]
+
+        ## Sorting jets by pt
+        index = ak.argsort(presort_recojets.pt, ascending=False)
+        
+        recojets  = presort_recojets[index]
+        #recojets = presort_recojets
+        events0 = ak.with_field(events0, recojets, "FatJet")
+        
+        sel.add("oneRecoJet", 
+                     ak.sum( (events0.FatJet.pt > 0) & (np.abs(events0.FatJet.eta) < 2.5)  & (events0.FatJet.jetId == 6), axis=1 ) >= 1
+                )
+
+
+
+
+        reco_jet, z_jet_dphi_reco = get_dphi( z_reco, recojets )
+    
+    
+        reco_jet = ak.firsts(recojets)
+
+        
+        #print("Special event reco_jet object pt", reco_jet[sel_spl].pt)
+        #print("Special event FatJets object pt, eta, jetid", events0[sel_spl].FatJet.pt, events0[sel_spl].FatJet.eta, events0[sel_spl].FatJet.jetId)
+
+        #print("Special event FatJets object pt, eta, jetid", recojets[sel_spl].pt, recojets[sel_spl].eta, recojets[sel_spl].jetId)
+        #reco_jet, dr = find_closest_dr( gen_jet, recojets )
+        z_jet_dr_reco = reco_jet.delta_r(z_reco)
+        z_jet_dphi_reco_values = z_jet_dphi_reco
+
+        ####### MAKE PRESEL PLOTS ######
+        #filter_sel = sel.all('npv', 'oneRecoJet')
+        reco_exists = ~ak.is_none(reco_jet.mass)
+
+        
+        #####################################
+        ### Reco event topology sel
+        #####################################
+        z_jet_dphi_sel_reco = (z_jet_dphi_reco > 1.57)  #& (sel.require(twoReco_leptons = True))#np.pi * 0.5
+        z_pt_asym_reco = np.abs(z_reco.pt - reco_jet.pt) / (z_reco.pt + reco_jet.pt)
+        z_pt_frac_reco = reco_jet.pt / z_reco.pt
+        z_pt_asym_sel_reco = (z_pt_asym_reco < 0.3) #& (sel.require(twoReco_leptons = True))
+        sel.add("z_jet_dphi_sel_reco", z_jet_dphi_sel_reco)
+        sel.add("z_pt_asym_sel_reco", z_pt_asym_sel_reco)
+
+
+        
+        kinsel_reco = sel.require(twoReco_leptons=True,oneRecoJet=True,z_ptcut_reco=True,z_mcut_reco=True)#, jetid = True)
+        sel.add("kinsel_reco", kinsel_reco)
+        #print("Leading RECO Jet matched muon ID", reco_jet.muonIdx3SJ)
+        #print("Z-Jet dphi cut ",  sel.require(kinsel_reco= True, z_jet_dphi_sel_reco= True,trigsel= True ).sum())
+        #print("Z-Jet pt-asymmetry cut ",  sel.require(kinsel_reco= True,z_jet_dphi_sel_reco= True, z_pt_asym_sel_reco= True,trigsel= True ).sum())
+
+        
+        toposel_reco = sel.require( z_pt_asym_sel_reco=True, z_jet_dphi_sel_reco=True)
+        sel.add("toposel_reco", toposel_reco)
+        if self._do_gen:
+            is_matched_reco = reco_jet.delta_r(gen_jet) < 0.4
+            sel.add("is_matched_reco", is_matched_reco)
+
+            allsel_reco = sel.all("npv", "MET", "kinsel_reco", "toposel_reco", "is_matched_reco" )
+            sel.add("allsel_reco", allsel_reco)
+            is_matched_gen = gen_jet.delta_r(reco_jet) < 0.4
+            sel.add("is_matched_gen", is_matched_gen)
+            allsel_gen = sel.all("kinsel_gen", "toposel_gen" , "is_matched_gen" )
+            sel.add("allsel_gen", allsel_gen)
+            sel.add("fakes", sel.require(allsel_reco = True, allsel_gen = False))
+        else:
+            allsel_reco = sel.all("npv", "MET", "kinsel_reco", "toposel_reco" )
+            sel.add("allsel_reco", allsel_reco)
+
+        
+
+
+
+
+
+
+
+
+
+
+
+
+        ##########################################
+        ## Work in progress above this line ##
+        ##########################################
+        gen_jet_truth = gen_jet[sel.require(allsel_gen = True)]
+        ptgen = gen_jet_truth.pt
+        ptgen = ptgen[~ak.is_none(ptgen)]
+        mgen = gen_jet_truth.mass
+        mgen = mgen[~ak.is_none(mgen)]
+
+        self.logging.debug(f"No of GEN JET {len(mgen)}")
+        
+
+        fill_hist(self.hists, "ptjet_mjet_u_gen", dataset = dataset, channel = channel, ptgen = ptgen, mgen = mgen, systematic = "nominal")
+        reco_jet_meas = reco_jet[sel.require(allsel_reco = True)]
+        ptreco = reco_jet_meas.pt
+        ptreco_g = reco_jet_meas.pt
+        mreco = reco_jet_meas.mass
+        mreco_g = reco_jet_meas.msoftdrop
+
+        ptreco = ptreco[~ak.is_none(mreco)]
+        mreco = mreco[~ak.is_none(mreco)]
         mreco_g = mreco_g[~ak.is_none(mreco_g)]
+        ptreco_g = ptreco_g[~ak.is_none(mreco_g)]
+        
+        self.logging.debug(f"No of RECO JET {len(mreco)}")
+        
         fill_hist(self.hists, "ptjet_mjet_u_reco", dataset = dataset, channel = channel, ptreco = ptreco, mreco = mreco, systematic = "nominal")
-        fill_hist(self.hists, "ptjet_mjet_g_reco", dataset = dataset, channel = channel, ptreco = ptreco, mreco = mreco_g, systematic = "nominal")
+        fill_hist(self.hists, "ptjet_mjet_g_reco", dataset = dataset, channel = channel, ptreco = ptreco_g, mreco = mreco_g, systematic = "nominal")
+
+
+        # Passing both gen and reco selections
+        sel_both = sel.require(allsel_reco = True, allsel_gen = True)
+        gen_jet_both = gen_jet[sel_both]
+        reco_jet_both = reco_jet[sel_both]
+
+        ptgen_both = gen_jet_both.pt
+        ptgen_both = ptgen_both[~ak.is_none(ptgen_both)]
+        mgen_both = gen_jet_both.mass
+        mgen_both = mgen_both[~ak.is_none(mgen_both)]
+        ptreco_both = reco_jet_both.pt
+        ptreco_both = ptreco_both[~ak.is_none(ptreco_both)]
+        mreco_both = reco_jet_both.mass
+        mreco_both = mreco_both[~ak.is_none(mreco_both)]
+        fill_hist(self.hists, "response_matrix_u", dataset = dataset, channel = channel, ptreco = ptreco_both, mreco = mreco_both, ptgen = ptgen_both, mgen = mgen_both, systematic = "nominal")
+        ptreco_both_g = reco_jet_both.pt
+        ptreco_both_g = ptreco_both_g[~ak.is_none(ptreco_both_g)]
+        mreco_both_g = reco_jet_both.msoftdrop
+        mreco_both_g = mreco_both_g[~ak.is_none(mreco_both_g)]
+        fill_hist(self.hists, "response_matrix_g", dataset = dataset, channel = channel, ptreco = ptreco_both_g, mreco = mreco_both_g, ptgen = ptgen_both, mgen = mgen_both, systematic = "nominal")
         return self.hists
 
     def postprocess(self, accumulator):
-        hname_list = ["ptjet_mjet_u_reco", 'ptjet_mjet_g_reco']
+        hname_list = ["ptjet_mjet_u_reco", 'ptjet_mjet_g_reco', "ptjet_mjet_u_gen", "ptjet_mjet_g_gen"]
         sumw = accumulator["sumw"]
 
         for hname in hname_list:
@@ -226,7 +568,9 @@ class QJetMassProcessor(processor.ProcessorABC):
                     scale = (xs * self.lumi_fb * 1000) / sw
                     for i, name in enumerate(h.axes["dataset"]):
                         h.view(flow=True)[i] *= scale
+                    self.logging.info(f"Scaled {hname} for dataset {ds} by {scale:.6f} = {xs} * {self.lumi_fb*1000} / {sw}")
             accumulator[hname] = h
+
         return accumulator
 
                     

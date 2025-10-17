@@ -17,7 +17,7 @@ _HNAME = {
 @lru_cache(maxsize=None)
 def _load_cset(iov: str) -> correctionlib.CorrectionSet:
     """Load and cache the CorrectionSet from packaged resources."""
-    pkg_path = f"zjet_corrections/pu/{iov}_UL/puWeights.json.gz"
+    pkg_path = f"zjet_corrections/correctins/pu/{iov}_UL/puWeights.json.gz"
     with files("zjet_corrections").joinpath(f"pu/{iov}_UL/puWeights.json.gz").open("rb") as fh:
         raw = fh.read()
     data = gzip.decompress(raw).decode("utf-8")
