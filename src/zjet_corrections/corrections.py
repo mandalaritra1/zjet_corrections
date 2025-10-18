@@ -1,7 +1,8 @@
 import gzip
 import json
 from functools import lru_cache
-from importlib.resources import files
+from importlib.resources import files, as_file
+from pathlib import Path
 import numpy as np
 import awkward as ak
 import correctionlib
@@ -395,53 +396,53 @@ def GetJetCorrections(FatJets, events, era, IOV, isData=False, uncertainties = N
     #print("extracting corrections from files for " + jec_tag)
     ext = extractor()
     
-    import os
-    corrections_root = files("zjet_corrections") / "corrections"
-    jec_dir = corrections_root / "JEC" / jec_tag
-    data_path = jec_dir / f"{jec_tag}_L1FastJet_{AK_str}.jec.txt"
-    print("File exists check for JEC: ", str(data_path))
-    print(os.path.exists(str(data_path)))
+    with as_file(files("zjet_corrections") / "corrections") as corrections_root:
+        corrections_root = Path(corrections_root)
+        jec_dir = corrections_root / "JEC" / jec_tag
+        data_path = jec_dir / f"{jec_tag}_L1FastJet_{AK_str}.jec.txt"
+        print("File exists check for JEC: ", str(data_path))
+        print(data_path.exists())
 
-    if not isData:
-    #For MC
-        ext.add_weight_sets([
-            '* * ' + str(jec_dir / f"{jec_tag}_L1FastJet_{AK_str}.jec.txt"),
-            '* * ' + str(jec_dir / f"{jec_tag}_L2Relative_{AK_str}.jec.txt"),
-            '* * ' + str(jec_dir / f"{jec_tag}_L3Absolute_{AK_str}.jec.txt"),
-            '* * ' + str(jec_dir / f"{jec_tag}_UncertaintySources_{AK_str}.junc.txt"),
-            '* * ' + str(jec_dir / f"{jec_tag}_Uncertainty_{AK_str}.junc.txt"),
-        ])
-        #### Do AK8PUPPI jer files exist??
-        if jer_tag:
-            jer_dir = corrections_root / "JER" / jer_tag
+        if not isData:
+        #For MC
             ext.add_weight_sets([
-            '* * ' + str(jer_dir / f"{jer_tag}_PtResolution_{AK_str}.jr.txt"),
-            '* * ' + str(jer_dir / f"{jer_tag}_SF_{AK_str}.jersf.txt")])
-            # print("JER SF added")
-    else:       
-        
-        #For data, make sure we don't duplicate
-        tags_done = []
-        print("In the DATA section")
-        for run, tag in jec_tag_data.items():
-            if not (tag in tags_done):
-
-                #print("Doing", tag, AK_str)
-                tag_dir = corrections_root / "JEC" / tag
+                '* * ' + str(jec_dir / f"{jec_tag}_L1FastJet_{AK_str}.jec.txt"),
+                '* * ' + str(jec_dir / f"{jec_tag}_L2Relative_{AK_str}.jec.txt"),
+                '* * ' + str(jec_dir / f"{jec_tag}_L3Absolute_{AK_str}.jec.txt"),
+                '* * ' + str(jec_dir / f"{jec_tag}_UncertaintySources_{AK_str}.junc.txt"),
+                '* * ' + str(jec_dir / f"{jec_tag}_Uncertainty_{AK_str}.junc.txt"),
+            ])
+            #### Do AK8PUPPI jer files exist??
+            if jer_tag:
+                jer_dir = corrections_root / "JER" / jer_tag
                 ext.add_weight_sets([
-                '* * ' + str(tag_dir / f"{tag}_L1FastJet_{AK_str}.jec.txt"),
-                '* * ' + str(tag_dir / f"{tag}_L2Relative_{AK_str}.jec.txt"),
-                '* * ' + str(tag_dir / f"{tag}_L3Absolute_{AK_str}.jec.txt"),
-                '* * ' + str(tag_dir / f"{tag}_L2L3Residual_{AK_str}.jec.txt"),
-                ])
-                tags_done += [tag]
-                #print("Done", tag, AK_str)
-        print("Added JEC weight sets")
+                '* * ' + str(jer_dir / f"{jer_tag}_PtResolution_{AK_str}.jr.txt"),
+                '* * ' + str(jer_dir / f"{jer_tag}_SF_{AK_str}.jersf.txt")])
+                # print("JER SF added")
+        else:       
+            
+            #For data, make sure we don't duplicate
+            tags_done = []
+            print("In the DATA section")
+            for run, tag in jec_tag_data.items():
+                if not (tag in tags_done):
+
+                    #print("Doing", tag, AK_str)
+                    tag_dir = corrections_root / "JEC" / tag
+                    ext.add_weight_sets([
+                    '* * ' + str(tag_dir / f"{tag}_L1FastJet_{AK_str}.jec.txt"),
+                    '* * ' + str(tag_dir / f"{tag}_L2Relative_{AK_str}.jec.txt"),
+                    '* * ' + str(tag_dir / f"{tag}_L3Absolute_{AK_str}.jec.txt"),
+                    '* * ' + str(tag_dir / f"{tag}_L2L3Residual_{AK_str}.jec.txt"),
+                    ])
+                    tags_done += [tag]
+                    #print("Done", tag, AK_str)
+            print("Added JEC weight sets")
 
         
-    ext.finalize()
+        ext.finalize()
 
-    evaluator = ext.make_evaluator()
+        evaluator = ext.make_evaluator()
 
     if (not isData):
         jec_names = [
