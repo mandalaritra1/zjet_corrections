@@ -9,6 +9,7 @@ from typing import Optional
 import numpy as np
 import awkward as ak
 import correctionlib
+import tempfile
 from coffea.lumi_tools import LumiMask
 from coffea.lookup_tools.correctionlib_wrapper import correctionlib_wrapper
 from coffea.lookup_tools import extractor
@@ -342,7 +343,10 @@ def debug_jec_weightset(iov: str = "2018", mode: str = "AK8", is_data: bool = Fa
     exists_in_package = target_resource.is_file()
 
     with ExitStack() as stack:
-        target_path = Path(stack.enter_context(as_file(target_resource)))
+        tmp_dir = Path(stack.enter_context(tempfile.TemporaryDirectory()))
+        target_path = tmp_dir / target_resource.name
+        with target_resource.open("rb") as src, target_path.open("wb") as dst:
+            dst.write(src.read())
         ext = extractor()
         ext.add_weight_sets([f"* * {target_path.as_posix()}"])
         ext.finalize()
@@ -436,11 +440,20 @@ def GetJetCorrections(FatJets, events, era, IOV, isData=False, uncertainties = N
     print(data_file.is_file())
 
     with ExitStack() as stack:
+        tmp_dir = Path(stack.enter_context(tempfile.TemporaryDirectory()))
+        cache = {}
+
         def resource_file(*parts: str) -> Path:
             traversable = corrections_root.joinpath(*parts)
             if not traversable.is_file():
                 raise FileNotFoundError(f"Missing correction resource at {traversable}")
-            return Path(stack.enter_context(as_file(traversable)))
+            key = "/".join(parts)
+            if key not in cache:
+                target_path = tmp_dir / traversable.name
+                with traversable.open("rb") as src, target_path.open("wb") as dst:
+                    dst.write(src.read())
+                cache[key] = target_path
+            return cache[key]
 
         if not isData:
         #For MC
