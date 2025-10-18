@@ -292,7 +292,7 @@ class QJetMassProcessor(processor.ProcessorABC):
 
             events0 = ak.with_field(
                                 events0,
-                                events0.GenJetAK8[(events0.GenJetAK8.pt > 200)
+                                events0.GenJetAK8[(events0.GenJetAK8.pt > 0)
                                             & (np.abs(events0.GenJetAK8.eta) < 2.5)
                                 ],
                                 "GenJetAK8"
@@ -533,6 +533,9 @@ class QJetMassProcessor(processor.ProcessorABC):
         ptgen_both = ptgen_both[~ak.is_none(ptgen_both)]
         mgen_both = gen_jet_both.mass
         mgen_both = mgen_both[~ak.is_none(mgen_both)]
+
+        self.logging.debug(f"No of GEN JET also passing RECO {len(mgen_both)}")
+        
         ptreco_both = reco_jet_both.pt
         ptreco_both = ptreco_both[~ak.is_none(ptreco_both)]
         mreco_both = reco_jet_both.mass
@@ -546,7 +549,7 @@ class QJetMassProcessor(processor.ProcessorABC):
         return self.hists
 
     def postprocess(self, accumulator):
-        hname_list = ["ptjet_mjet_u_reco", 'ptjet_mjet_g_reco', "ptjet_mjet_u_gen", "ptjet_mjet_g_gen"]
+        hname_list = ["ptjet_mjet_u_reco", 'ptjet_mjet_g_reco', "ptjet_mjet_u_gen", "ptjet_mjet_g_gen", "response_matrix_u", "response_matrix_g"]
         sumw = accumulator["sumw"]
 
         for hname in hname_list:
