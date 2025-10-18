@@ -8,4 +8,4 @@ version = "0.1.0"
 dependencies = ["correctionlib>=2.2"]
 
 [tool.setuptools.package-data]
-"zjet_corrections" = ["pu/*/puWeights.json.gz"]
+"zjet_corrections" = ["corrections/**/*"]

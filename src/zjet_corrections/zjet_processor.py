@@ -11,19 +11,23 @@ import pandas as pd
 import time
 from coffea import util, processor
 from coffea.nanoevents import NanoEventsFactory, NanoAODSchema, BaseSchema
-from coffea.analysis_tools import PackedSelection
+#from coffea.analysis_tools import PackedSelection
 from collections import defaultdict
 import gc
 import tokenize as tok
 import re
 
+
 from coffea.lookup_tools.dense_lookup import dense_lookup
 from coffea.jetmet_tools import JetResolutionScaleFactor
 from coffea.jetmet_tools import FactorizedJetCorrector, JetCorrectionUncertainty
 from coffea.jetmet_tools import JECStack, CorrectedJetsFactory
-from .weight_class import Weights
+from .weight_class import Weights, PackedSelection
+
 from .hist_utils import *
 from .smp_utils import *
+
+from .corrections import *
 
 class Log:
     def __init__(self, mode="info"):
@@ -209,7 +213,11 @@ class QJetMassProcessor(processor.ProcessorABC):
         events0 = events1 # this will happen when implememting JECs
 
         weights = Weights(size = len(events0), storeIndividual = True) #initialize weights class
-
+        self.logging.debug("Weights initialized")
+        pu_nom, pu_up, pu_down = get_pu_weights(events0, IOV)
+        self.logging.debug(f"PU weights (nom, up, down) : {pu_nom}, {pu_up}, {pu_down}")
+        
+        weights.add(name = "pu", weight = pu_nom, weightUp = pu_up, weightDown = pu_down)
         # Store GEN weights or ones based on Simulation/Data
         if self._do_gen:
             
@@ -418,6 +426,23 @@ class QJetMassProcessor(processor.ProcessorABC):
         recojets  = presort_recojets[index]
         #recojets = presort_recojets
         events0 = ak.with_field(events0, recojets, "FatJet")
+
+        # Apply jet corrections and show leading changes for quick inspection
+        fatjet_pt_before = ak.to_numpy(ak.flatten(events0.FatJet.pt, axis=None))
+        corr_fatjets = GetJetCorrections(
+            events0.FatJet,
+            events0,
+            era=dataset,
+            IOV=IOV,
+            isData=not self._do_gen,
+            mode='AK8',
+        )
+        fatjet_pt_after = ak.to_numpy(ak.flatten(corr_fatjets.pt, axis=None))
+        self.logging.debug(f"FatJet pt before correction: {fatjet_pt_before[:5]}" )
+        self.logging.debug(f"FatJet pt after correction: {fatjet_pt_after[:5]}" )
+
+        events0 = ak.with_field(events0, corr_fatjets, "FatJet")
+        recojets = events0.FatJet
         
         sel.add("oneRecoJet", 
                      ak.sum( (events0.FatJet.pt > 0) & (np.abs(events0.FatJet.eta) < 2.5)  & (events0.FatJet.jetId == 6), axis=1 ) >= 1

@@ -1,6 +1,8 @@
 import numpy
 import coffea.processor
 import coffea.util
+from functools import lru_cache
+import dask
 
 class WeightStatistics:
     def __init__(self, sumw=0.0, sumw2=0.0, minw=numpy.inf, maxw=-numpy.inf, n=0):
@@ -286,3 +288,168 @@ class Weights:
         for k in self._modifiers.keys():
             keys.add(k.replace("Up", "Down"))
         return keys
+
+
+
+## New PackedSelection
+
+class PackedSelection:
+    """Store several boolean arrays in a compact manner
+
+    This class can store several boolean arrays in a memory-efficient mannner
+    and evaluate arbitrary combinations of boolean requirements in an CPU-efficient way.
+    Supported inputs are 1D numpy or awkward arrays.
+
+    Parameters
+    ----------
+        dtype : numpy.dtype or str
+            internal bitwidth of the packed array, which governs the maximum
+            number of selections storable in this object. The default value
+            is ``uint32``, which allows up to 32 booleans to be stored, but
+            if a smaller or larger number of selections needs to be stored,
+            one can choose ``uint16`` or ``uint64`` instead.
+    """
+
+    _supported_types = {
+        numpy.dtype("uint16"): 16,
+        numpy.dtype("uint32"): 32,
+        numpy.dtype("uint64"): 64,
+    }
+
+    def __init__(self, dtype="uint32"):
+        self._dtype = numpy.dtype(dtype)
+        if self._dtype not in PackedSelection._supported_types:
+            raise ValueError(f"dtype {dtype} is not supported")
+        self._names = []
+        self._data = None
+
+    @property
+    def names(self):
+        """Current list of mask names available"""
+        return self._names
+
+    @property
+    def maxitems(self):
+        return PackedSelection._supported_types[self._dtype]
+
+    def add(self, name, selection, fill_value=False):
+        """Add a new boolean array
+
+        Parameters
+        ----------
+            name : str
+                name of the selection
+            selection : numpy.ndarray or awkward.Array
+                a flat array of type ``bool`` or ``?bool``.
+                If this is not the first selection added, it must also have
+                the same shape as previously added selections. If the array
+                is option-type, null entries will be filled with ``fill_value``.
+            fill_value : bool, optional
+                All masked entries will be filled as specified (default: ``False``)
+        """
+        selection = coffea.util._ensure_flat(selection, allow_missing=True)
+        if isinstance(selection, numpy.ma.MaskedArray):
+            selection = selection.filled(fill_value)
+        if selection.dtype != bool:
+            raise ValueError(f"Expected a boolean array, received {selection.dtype}")
+        if len(self._names) == 0:
+            self._data = numpy.zeros(len(selection), dtype=self._dtype)
+        elif len(self._names) == self.maxitems:
+            raise RuntimeError(
+                f"Exhausted all slots in {self}, consider a larger dtype or fewer selections"
+            )
+        elif self._data.shape != selection.shape:
+            raise ValueError(
+                f"New selection '{name}' has a different shape than existing selections ({selection.shape} vs. {self._data.shape})"
+            )
+        numpy.bitwise_or(
+            self._data,
+            self._dtype.type(1 << len(self._names)),
+            where=selection,
+            out=self._data,
+        )
+        self._names.append(name)
+
+    def require(self, **names):
+        """Return a mask vector corresponding to specific requirements
+
+        Specify an exact requirement on an arbitrary subset of the masks
+
+        Parameters
+        ----------
+            ``**names`` : kwargs
+                Each argument to require specific value for, in form ``arg=True``
+                or ``arg=False``.
+
+        Examples
+        --------
+        If
+
+        >>> selection.names
+        ['cut1', 'cut2', 'cut3']
+
+        then
+
+        >>> selection.require(cut1=True, cut2=False)
+        array([True, False, True, ...])
+
+        returns a boolean array where an entry is True if the corresponding entries
+        ``cut1 == True``, ``cut2 == False``, and ``cut3`` arbitrary.
+        """
+        consider = 0
+        require = 0
+        for name, val in names.items():
+            val = bool(val)
+            idx = self._names.index(name)
+            consider |= 1 << idx
+            require |= int(val) << idx
+        return (self._data & consider) == require
+
+    def all(self, *names):
+        """Shorthand for `require`, where all the values are True"""
+        return self.require(**{name: True for name in names})
+
+    def any(self, *names):
+        """Return a mask vector corresponding to an inclusive OR of requirements
+
+        Parameters
+        ----------
+            ``*names`` : args
+                The named selections to allow
+
+        Examples
+        --------
+        If
+
+        >>> selection.names
+        ['cut1', 'cut2', 'cut3']
+
+        then
+
+        >>> selection.any("cut1", "cut2")
+        array([True, False, True, ...])
+
+        returns a boolean array where an entry is True if the corresponding entries
+        ``cut1 == True`` or ``cut2 == False``, and ``cut3`` arbitrary.
+        """
+        consider = 0
+        for name in names:
+            idx = self._names.index(name)
+            consider |= 1 << idx
+        return (self._data & consider) != 0
+
+    def cutflow(self, *names):
+        """Return a cutflow dictionary
+
+        Returns
+        -------
+            cutflow : dict
+                A dictionary mapping each selection name to the number of entries
+                that pass that selection.
+        """
+        cutflow = {}
+        name_list = []
+        for name in names:
+            name_list.append(name)
+            cutflow[name] = numpy.sum(self.all(*name_list))
+        return cutflow
