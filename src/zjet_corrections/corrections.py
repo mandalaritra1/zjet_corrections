@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import awkward as ak
 import correctionlib
+from typing import Optional
 from coffea.lumi_tools import LumiMask
 from coffea.lookup_tools.correctionlib_wrapper import correctionlib_wrapper
 from coffea.lookup_tools import extractor
@@ -44,20 +45,6 @@ _JME_AK_LABEL = {
     "AK4": "AK4PFchs",
 }
 
-_JEC_TAGS = {
-    "2016APV": "Summer19UL16APV_V7_MC",
-    "2016": "Summer19UL16_V7_MC",
-    "2017": "Summer19UL17_V5_MC",
-    "2018": "Summer19UL18_V5_MC",
-}
-
-_JER_TAGS = {
-    "2016APV": "Summer20UL16APV_JRV3_MC",
-    "2016": "Summer20UL16_JRV3_MC",
-    "2017": "Summer19UL17_JRV2_MC",
-    "2018": "Summer19UL18_JRV2_MC",
-}
-
 _JEC_DATA_TAGS = {
     "2016APV": {
         "Run2016B": "Summer19UL16APV_RunBCD_V7_DATA",
@@ -85,6 +72,55 @@ _JEC_DATA_TAGS = {
         "Run2018D": "Summer19UL18_RunD_V5_DATA",
     },
 }
+
+
+def _resolve_jec_tags(iov: str):
+    if iov == "2018":
+        return (
+            "Summer19UL18_V5_MC",
+            {
+                "Run2018A": "Summer19UL18_RunA_V6_DATA",
+                "Run2018B": "Summer19UL18_RunB_V6_DATA",
+                "Run2018C": "Summer19UL18_RunC_V6_DATA",
+                "Run2018D": "Summer19UL18_RunD_V6_DATA",
+            },
+            "Summer19UL18_JRV2_MC",
+        )
+    if iov == "2017":
+        return (
+            "Summer19UL17_V5_MC",
+            {
+                "Run2017B": "Summer19UL17_RunB_V6_DATA",
+                "Run2017C": "Summer19UL17_RunC_V6_DATA",
+                "Run2017D": "Summer19UL17_RunD_V6_DATA",
+                "Run2017E": "Summer19UL17_RunE_V6_DATA",
+                "Run2017F": "Summer19UL17_RunF_V6_DATA",
+            },
+            "Summer19UL17_JRV3_MC",
+        )
+    if iov == "2016":
+        return (
+            "Summer19UL16_V7_MC",
+            {
+                "Run2016F": "Summer19UL16_RunFGH_V7_DATA",
+                "Run2016G": "Summer19UL16_RunFGH_V7_DATA",
+                "Run2016H": "Summer19UL16_RunFGH_V7_DATA",
+            },
+            "Summer20UL16_JRV3_MC",
+        )
+    if iov == "2016APV":
+        return (
+            "Summer19UL16_V7_MC",
+            {
+                "Run2016B": "Summer19UL16APV_RunBCD_V7_DATA",
+                "Run2016C": "Summer19UL16APV_RunBCD_V7_DATA",
+                "Run2016D": "Summer19UL16APV_RunBCD_V7_DATA",
+                "Run2016E": "Summer19UL16APV_RunEF_V7_DATA",
+                "Run2016F": "Summer19UL16APV_RunEF_V7_DATA",
+            },
+            "Summer20UL16APV_JRV3_MC",
+        )
+    raise ValueError(f"Unsupported IOV '{iov}' for jet energy corrections")
 
 
 @lru_cache(maxsize=None)
@@ -281,6 +317,41 @@ def getLumiMaskRun2():
     return masks
 
 
+def debug_jec_weightset(iov: str = "2018", mode: str = "AK8", is_data: bool = False, run: Optional[str] = None):
+    """Small helper to test reading a single JEC text file with coffea's extractor."""
+    mode_key = mode.upper()
+    if mode_key not in _JME_AK_LABEL:
+        raise ValueError(f"Unsupported jet mode '{mode}'. Expected one of {tuple(_JME_AK_LABEL)}.")
+
+    ak_label = _JME_AK_LABEL[mode_key]
+    jec_tag, jec_tag_data, _ = _resolve_jec_tags(iov)
+
+    with as_file(files("zjet_corrections") / "corrections") as corrections_root:
+        corrections_root = Path(corrections_root)
+        if is_data:
+            if run is None:
+                raise ValueError("Parameter 'run' must be provided when is_data=True.")
+            if run not in jec_tag_data:
+                raise KeyError(f"Run '{run}' not available for IOV '{iov}'.")
+            tag = jec_tag_data[run]
+            target = corrections_root / "JEC" / tag / f"{tag}_L1FastJet_{ak_label}.jec.txt"
+        else:
+            target = corrections_root / "JEC" / jec_tag / f"{jec_tag}_L1FastJet_{ak_label}.jec.txt"
+
+        exists_during_context = target.exists()
+        ext = extractor()
+        ext.add_weight_sets([f"* * {target.as_posix()}"])
+        ext.finalize()
+        evaluator = ext.make_evaluator()
+        keys = list(evaluator.keys())
+
+    return {
+        "path": target.as_posix(),
+        "exists_during_context": exists_during_context,
+        "evaluator_keys": keys,
+    }
+
+
 def jmssf(IOV, FatJet,  var = ''):
     jmsSF = {
 
@@ -348,49 +419,7 @@ def GetJetCorrections(FatJets, events, era, IOV, isData=False, uncertainties = N
     else:
         uncertainty_sources = uncertainties
     # original code https://gitlab.cern.ch/gagarwal/ttbardileptonic/-/blob/master/jmeCorrections.py
-    jer_tag=None
-    if (IOV=='2018'):
-        jec_tag="Summer19UL18_V5_MC"
-        jec_tag_data={
-            "Run2018A": "Summer19UL18_RunA_V6_DATA",
-            "Run2018B": "Summer19UL18_RunB_V6_DATA",
-            "Run2018C": "Summer19UL18_RunC_V6_DATA",
-            "Run2018D": "Summer19UL18_RunD_V6_DATA",
-        }
-        jer_tag = "Summer19UL18_JRV2_MC"
-    elif (IOV=='2017'):
-        jec_tag="Summer19UL17_V5_MC"
-        jec_tag_data={
-            "Run2017B": "Summer19UL17_RunB_V6_DATA",
-            "Run2017C": "Summer19UL17_RunC_V6_DATA",
-            "Run2017D": "Summer19UL17_RunD_V6_DATA",
-            "Run2017E": "Summer19UL17_RunE_V6_DATA",
-            "Run2017F": "Summer19UL17_RunF_V6_DATA",
-        }
-        jer_tag = "Summer19UL17_JRV3_MC"
-    elif (IOV=='2016'):
-        jec_tag="Summer19UL16_V7_MC"
-        jec_tag_data={
-            "Run2016F": "Summer19UL16_RunFGH_V7_DATA",
-            "Run2016G": "Summer19UL16_RunFGH_V7_DATA",
-            "Run2016H": "Summer19UL16_RunFGH_V7_DATA",
-        }
-        jer_tag = "Summer20UL16_JRV3_MC"
-    elif (IOV=='2016APV'):
-        jec_tag="Summer19UL16_V7_MC"
-        ## HIPM/APV     : B_ver1, B_ver2, C, D, E, F
-        ## non HIPM/APV : F, G, H
-
-        jec_tag_data={
-            "Run2016B": "Summer19UL16APV_RunBCD_V7_DATA",
-            "Run2016C": "Summer19UL16APV_RunBCD_V7_DATA",
-            "Run2016D": "Summer19UL16APV_RunBCD_V7_DATA",
-            "Run2016E": "Summer19UL16APV_RunEF_V7_DATA",
-            "Run2016F": "Summer19UL16APV_RunEF_V7_DATA",
-        }
-        jer_tag = "Summer20UL16APV_JRV3_MC"
-    else:
-        print(f"Error: Unknown year \"{IOV}\".")
+    jec_tag, jec_tag_data, jer_tag = _resolve_jec_tags(IOV)
 
 
     #print("extracting corrections from files for " + jec_tag)
@@ -406,18 +435,18 @@ def GetJetCorrections(FatJets, events, era, IOV, isData=False, uncertainties = N
         if not isData:
         #For MC
             ext.add_weight_sets([
-                '* * ' + str(jec_dir / f"{jec_tag}_L1FastJet_{AK_str}.jec.txt"),
-                '* * ' + str(jec_dir / f"{jec_tag}_L2Relative_{AK_str}.jec.txt"),
-                '* * ' + str(jec_dir / f"{jec_tag}_L3Absolute_{AK_str}.jec.txt"),
-                '* * ' + str(jec_dir / f"{jec_tag}_UncertaintySources_{AK_str}.junc.txt"),
-                '* * ' + str(jec_dir / f"{jec_tag}_Uncertainty_{AK_str}.junc.txt"),
+                '* * ' + (jec_dir / f"{jec_tag}_L1FastJet_{AK_str}.jec.txt").as_posix(),
+                '* * ' + (jec_dir / f"{jec_tag}_L2Relative_{AK_str}.jec.txt").as_posix(),
+                '* * ' + (jec_dir / f"{jec_tag}_L3Absolute_{AK_str}.jec.txt").as_posix(),
+                '* * ' + (jec_dir / f"{jec_tag}_UncertaintySources_{AK_str}.junc.txt").as_posix(),
+                '* * ' + (jec_dir / f"{jec_tag}_Uncertainty_{AK_str}.junc.txt").as_posix(),
             ])
             #### Do AK8PUPPI jer files exist??
             if jer_tag:
                 jer_dir = corrections_root / "JER" / jer_tag
                 ext.add_weight_sets([
-                '* * ' + str(jer_dir / f"{jer_tag}_PtResolution_{AK_str}.jr.txt"),
-                '* * ' + str(jer_dir / f"{jer_tag}_SF_{AK_str}.jersf.txt")])
+                '* * ' + (jer_dir / f"{jer_tag}_PtResolution_{AK_str}.jr.txt").as_posix(),
+                '* * ' + (jer_dir / f"{jer_tag}_SF_{AK_str}.jersf.txt").as_posix()])
                 # print("JER SF added")
         else:       
             
@@ -430,10 +459,10 @@ def GetJetCorrections(FatJets, events, era, IOV, isData=False, uncertainties = N
                     #print("Doing", tag, AK_str)
                     tag_dir = corrections_root / "JEC" / tag
                     ext.add_weight_sets([
-                    '* * ' + str(tag_dir / f"{tag}_L1FastJet_{AK_str}.jec.txt"),
-                    '* * ' + str(tag_dir / f"{tag}_L2Relative_{AK_str}.jec.txt"),
-                    '* * ' + str(tag_dir / f"{tag}_L3Absolute_{AK_str}.jec.txt"),
-                    '* * ' + str(tag_dir / f"{tag}_L2L3Residual_{AK_str}.jec.txt"),
+                    '* * ' + (tag_dir / f"{tag}_L1FastJet_{AK_str}.jec.txt").as_posix(),
+                    '* * ' + (tag_dir / f"{tag}_L2Relative_{AK_str}.jec.txt").as_posix(),
+                    '* * ' + (tag_dir / f"{tag}_L3Absolute_{AK_str}.jec.txt").as_posix(),
+                    '* * ' + (tag_dir / f"{tag}_L2L3Residual_{AK_str}.jec.txt").as_posix(),
                     ])
                     tags_done += [tag]
                     #print("Done", tag, AK_str)
