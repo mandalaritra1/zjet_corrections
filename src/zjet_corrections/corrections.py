@@ -1,12 +1,14 @@
 import gzip
 import json
+from contextlib import ExitStack
 from functools import lru_cache
 from importlib.resources import files, as_file
 from pathlib import Path
+from typing import Optional
+
 import numpy as np
 import awkward as ak
 import correctionlib
-from typing import Optional
 from coffea.lumi_tools import LumiMask
 from coffea.lookup_tools.correctionlib_wrapper import correctionlib_wrapper
 from coffea.lookup_tools import extractor
@@ -326,28 +328,30 @@ def debug_jec_weightset(iov: str = "2018", mode: str = "AK8", is_data: bool = Fa
     ak_label = _JME_AK_LABEL[mode_key]
     jec_tag, jec_tag_data, _ = _resolve_jec_tags(iov)
 
-    with as_file(files("zjet_corrections") / "corrections") as corrections_root:
-        corrections_root = Path(corrections_root)
-        if is_data:
-            if run is None:
-                raise ValueError("Parameter 'run' must be provided when is_data=True.")
-            if run not in jec_tag_data:
-                raise KeyError(f"Run '{run}' not available for IOV '{iov}'.")
-            tag = jec_tag_data[run]
-            target = corrections_root / "JEC" / tag / f"{tag}_L1FastJet_{ak_label}.jec.txt"
-        else:
-            target = corrections_root / "JEC" / jec_tag / f"{jec_tag}_L1FastJet_{ak_label}.jec.txt"
+    corrections_root = files("zjet_corrections").joinpath("corrections")
+    if is_data:
+        if run is None:
+            raise ValueError("Parameter 'run' must be provided when is_data=True.")
+        if run not in jec_tag_data:
+            raise KeyError(f"Run '{run}' not available for IOV '{iov}'.")
+        tag = jec_tag_data[run]
+        target_resource = corrections_root.joinpath("JEC", tag, f"{tag}_L1FastJet_{ak_label}.jec.txt")
+    else:
+        target_resource = corrections_root.joinpath("JEC", jec_tag, f"{jec_tag}_L1FastJet_{ak_label}.jec.txt")
 
-        exists_during_context = target.exists()
+    exists_in_package = target_resource.is_file()
+
+    with ExitStack() as stack:
+        target_path = Path(stack.enter_context(as_file(target_resource)))
         ext = extractor()
-        ext.add_weight_sets([f"* * {target.as_posix()}"])
+        ext.add_weight_sets([f"* * {target_path.as_posix()}"])
         ext.finalize()
         evaluator = ext.make_evaluator()
         keys = list(evaluator.keys())
 
     return {
-        "path": target.as_posix(),
-        "exists_during_context": exists_during_context,
+        "path": target_path.as_posix(),
+        "resource_exists": exists_in_package,
         "evaluator_keys": keys,
     }
 
@@ -424,29 +428,34 @@ def GetJetCorrections(FatJets, events, era, IOV, isData=False, uncertainties = N
 
     #print("extracting corrections from files for " + jec_tag)
     ext = extractor()
-    
-    with as_file(files("zjet_corrections") / "corrections") as corrections_root:
-        corrections_root = Path(corrections_root)
-        jec_dir = corrections_root / "JEC" / jec_tag
-        data_path = jec_dir / f"{jec_tag}_L1FastJet_{AK_str}.jec.txt"
-        print("File exists check for JEC: ", str(data_path))
-        print(data_path.exists())
+    pkg_root = files("zjet_corrections")
+    corrections_root = pkg_root.joinpath("corrections")
+    jec_dir = corrections_root.joinpath("JEC", jec_tag)
+    data_file = jec_dir.joinpath(f"{jec_tag}_L1FastJet_{AK_str}.jec.txt")
+    print("File exists check for JEC: ", str(data_file))
+    print(data_file.is_file())
+
+    with ExitStack() as stack:
+        def resource_file(*parts: str) -> Path:
+            traversable = corrections_root.joinpath(*parts)
+            if not traversable.is_file():
+                raise FileNotFoundError(f"Missing correction resource at {traversable}")
+            return Path(stack.enter_context(as_file(traversable)))
 
         if not isData:
         #For MC
             ext.add_weight_sets([
-                '* * ' + (jec_dir / f"{jec_tag}_L1FastJet_{AK_str}.jec.txt").as_posix(),
-                '* * ' + (jec_dir / f"{jec_tag}_L2Relative_{AK_str}.jec.txt").as_posix(),
-                '* * ' + (jec_dir / f"{jec_tag}_L3Absolute_{AK_str}.jec.txt").as_posix(),
-                '* * ' + (jec_dir / f"{jec_tag}_UncertaintySources_{AK_str}.junc.txt").as_posix(),
-                '* * ' + (jec_dir / f"{jec_tag}_Uncertainty_{AK_str}.junc.txt").as_posix(),
+                '* * ' + resource_file("JEC", jec_tag, f"{jec_tag}_L1FastJet_{AK_str}.jec.txt").as_posix(),
+                '* * ' + resource_file("JEC", jec_tag, f"{jec_tag}_L2Relative_{AK_str}.jec.txt").as_posix(),
+                '* * ' + resource_file("JEC", jec_tag, f"{jec_tag}_L3Absolute_{AK_str}.jec.txt").as_posix(),
+                '* * ' + resource_file("JEC", jec_tag, f"{jec_tag}_UncertaintySources_{AK_str}.junc.txt").as_posix(),
+                '* * ' + resource_file("JEC", jec_tag, f"{jec_tag}_Uncertainty_{AK_str}.junc.txt").as_posix(),
             ])
             #### Do AK8PUPPI jer files exist??
             if jer_tag:
-                jer_dir = corrections_root / "JER" / jer_tag
                 ext.add_weight_sets([
-                '* * ' + (jer_dir / f"{jer_tag}_PtResolution_{AK_str}.jr.txt").as_posix(),
-                '* * ' + (jer_dir / f"{jer_tag}_SF_{AK_str}.jersf.txt").as_posix()])
+                '* * ' + resource_file("JER", jer_tag, f"{jer_tag}_PtResolution_{AK_str}.jr.txt").as_posix(),
+                '* * ' + resource_file("JER", jer_tag, f"{jer_tag}_SF_{AK_str}.jersf.txt").as_posix()])
                 # print("JER SF added")
         else:       
             
@@ -457,12 +466,11 @@ def GetJetCorrections(FatJets, events, era, IOV, isData=False, uncertainties = N
                 if not (tag in tags_done):
 
                     #print("Doing", tag, AK_str)
-                    tag_dir = corrections_root / "JEC" / tag
                     ext.add_weight_sets([
-                    '* * ' + (tag_dir / f"{tag}_L1FastJet_{AK_str}.jec.txt").as_posix(),
-                    '* * ' + (tag_dir / f"{tag}_L2Relative_{AK_str}.jec.txt").as_posix(),
-                    '* * ' + (tag_dir / f"{tag}_L3Absolute_{AK_str}.jec.txt").as_posix(),
-                    '* * ' + (tag_dir / f"{tag}_L2L3Residual_{AK_str}.jec.txt").as_posix(),
+                    '* * ' + resource_file("JEC", tag, f"{tag}_L1FastJet_{AK_str}.jec.txt").as_posix(),
+                    '* * ' + resource_file("JEC", tag, f"{tag}_L2Relative_{AK_str}.jec.txt").as_posix(),
+                    '* * ' + resource_file("JEC", tag, f"{tag}_L3Absolute_{AK_str}.jec.txt").as_posix(),
+                    '* * ' + resource_file("JEC", tag, f"{tag}_L2L3Residual_{AK_str}.jec.txt").as_posix(),
                     ])
                     tags_done += [tag]
                     #print("Done", tag, AK_str)
