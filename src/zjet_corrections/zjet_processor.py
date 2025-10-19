@@ -574,59 +574,70 @@ class QJetMassProcessor(processor.ProcessorABC):
                 # Fill histograms
                 # GEN level histograms
                 
-
-                if self._do_gen:
-                    gen_jet_truth = gen_jet[sel.require(allsel_gen = True)]
-                    weights_gen = weights.weight()[sel.require(allsel_gen = True)]
-
-                    ptgen = gen_jet_truth.pt
-                    ptgen = ptgen[~ak.is_none(ptgen)]
-                    mgen = gen_jet_truth.mass
-                    mgen = mgen[~ak.is_none(mgen)]
-                    weights_gen = weights_gen[~ak.is_none(mgen)]
-
-                    self.logging.debug(f"No of GEN JET {len(mgen)}")           
-
-                    fill_hist(self.hists, "ptjet_mjet_u_gen", dataset = dataset, channel = channel, ptgen = ptgen, mgen = mgen, weight = weights_gen, systematic = "nominal")
-                reco_jet_meas = reco_jet[sel.require(allsel_reco = True)]
-                ptreco = reco_jet_meas.pt
-                ptreco_g = reco_jet_meas.pt
-                mreco = reco_jet_meas.mass
-                mreco_g = reco_jet_meas.msoftdrop
-
-                ptreco = ptreco[~ak.is_none(mreco)]
-                mreco = mreco[~ak.is_none(mreco)]
-                mreco_g = mreco_g[~ak.is_none(mreco_g)]
-                ptreco_g = ptreco_g[~ak.is_none(mreco_g)]
-                
-                self.logging.debug(f"No of RECO JET {len(mreco)}")
-                
-                fill_hist(self.hists, "ptjet_mjet_u_reco", dataset = dataset, channel = channel, ptreco = ptreco, mreco = mreco, systematic = "nominal")
-                fill_hist(self.hists, "ptjet_mjet_g_reco", dataset = dataset, channel = channel, ptreco = ptreco_g, mreco = mreco_g, systematic = "nominal")
-
-
-                # Passing both gen and reco selections
                 sel_both = sel.require(allsel_reco = True, allsel_gen = True)
-                gen_jet_both = gen_jet[sel_both]
-                reco_jet_both = reco_jet[sel_both]
+                if jet_syst == "nominal":
+                    for syst in self.systematics:
+                        if syst == "nominal":
+                            weights_gen =  weights.weight('genWeight')[sel.require(allsel_gen = True)]
+                            weights_reco = weights.weight()[sel.require(allsel_reco = True)]
+                            weights_both = weights.weight()[sel_both]
+                        else:
+                            weights_reco = weights.weight(syst)[sel.require(allsel_reco = True)]
+                            weights_both = weights.weight(syst)[sel_both]
+                        if self._do_gen:
+                            gen_jet_truth = gen_jet[sel.require(allsel_gen = True)]
+                            weights_gen = weights.weight( )[sel.require(allsel_gen = True)]
 
-                ptgen_both = gen_jet_both.pt
-                ptgen_both = ptgen_both[~ak.is_none(ptgen_both)]
-                mgen_both = gen_jet_both.mass
-                mgen_both = mgen_both[~ak.is_none(mgen_both)]
+                            ptgen = gen_jet_truth.pt
+                            ptgen = ptgen[~ak.is_none(ptgen)]
+                            mgen = gen_jet_truth.mass
+                            mgen = mgen[~ak.is_none(mgen)]
+                            weights_gen = weights_gen[~ak.is_none(mgen)]
 
-                self.logging.debug(f"No of GEN JET also passing RECO {len(mgen_both)}")
+                            self.logging.debug(f"No of GEN JET {len(mgen)}")           
+
+                            fill_hist(self.hists, "ptjet_mjet_u_gen", dataset = dataset, channel = channel, ptgen = ptgen, mgen = mgen, weight = weights_gen, systematic = "nominal")
+            
+                        reco_jet_meas = reco_jet[sel.require(allsel_reco = True)]
+                        ptreco = reco_jet_meas.pt
+                        ptreco_g = reco_jet_meas.pt
+                        mreco = reco_jet_meas.mass
+                        mreco_g = reco_jet_meas.msoftdrop
+
+                        ptreco = ptreco[~ak.is_none(mreco)]
+                        mreco = mreco[~ak.is_none(mreco)]
+                        mreco_g = mreco_g[~ak.is_none(mreco_g)]
+                        ptreco_g = ptreco_g[~ak.is_none(mreco_g)]
                 
-                ptreco_both = reco_jet_both.pt
-                ptreco_both = ptreco_both[~ak.is_none(ptreco_both)]
-                mreco_both = reco_jet_both.mass
-                mreco_both = mreco_both[~ak.is_none(mreco_both)]
-                fill_hist(self.hists, "response_matrix_u", dataset = dataset, channel = channel, ptreco = ptreco_both, mreco = mreco_both, ptgen = ptgen_both, mgen = mgen_both, systematic = "nominal")
-                ptreco_both_g = reco_jet_both.pt
-                ptreco_both_g = ptreco_both_g[~ak.is_none(ptreco_both_g)]
-                mreco_both_g = reco_jet_both.msoftdrop
-                mreco_both_g = mreco_both_g[~ak.is_none(mreco_both_g)]
-                fill_hist(self.hists, "response_matrix_g", dataset = dataset, channel = channel, ptreco = ptreco_both_g, mreco = mreco_both_g, ptgen = ptgen_both, mgen = mgen_both, systematic = "nominal")
+                        self.logging.debug(f"No of RECO JET {len(mreco)}")
+                        
+                        fill_hist(self.hists, "ptjet_mjet_u_reco", dataset = dataset, channel = channel, ptreco = ptreco, mreco = mreco, systematic = "nominal", weight = weights_reco)
+                        fill_hist(self.hists, "ptjet_mjet_g_reco", dataset = dataset, channel = channel, ptreco = ptreco_g, mreco = mreco_g, systematic = "nominal", weight = weights_reco)
+
+
+                    # Passing both gen and reco selections
+                    if self._do_gen:
+                        sel_both = sel.require(allsel_reco = True, allsel_gen = True)
+                        gen_jet_both = gen_jet[sel_both]
+                        reco_jet_both = reco_jet[sel_both]
+
+                        ptgen_both = gen_jet_both.pt
+                        ptgen_both = ptgen_both[~ak.is_none(ptgen_both)]
+                        mgen_both = gen_jet_both.mass
+                        mgen_both = mgen_both[~ak.is_none(mgen_both)]
+
+                        self.logging.debug(f"No of GEN JET also passing RECO {len(mgen_both)}")
+                        
+                        ptreco_both = reco_jet_both.pt
+                        ptreco_both = ptreco_both[~ak.is_none(ptreco_both)]
+                        mreco_both = reco_jet_both.mass
+                        mreco_both = mreco_both[~ak.is_none(mreco_both)]
+                        fill_hist(self.hists, "response_matrix_u", dataset = dataset, channel = channel, ptreco = ptreco_both, mreco = mreco_both, ptgen = ptgen_both, mgen = mgen_both, systematic = "nominal")
+                        ptreco_both_g = reco_jet_both.pt
+                        ptreco_both_g = ptreco_both_g[~ak.is_none(ptreco_both_g)]
+                        mreco_both_g = reco_jet_both.msoftdrop
+                        mreco_both_g = mreco_both_g[~ak.is_none(mreco_both_g)]
+                        fill_hist(self.hists, "response_matrix_g", dataset = dataset, channel = channel, ptreco = ptreco_both_g, mreco = mreco_both_g, ptgen = ptgen_both, mgen = mgen_both, systematic = "nominal")
 
                 if not self._do_gen:
                     break  # Exit the jet_syst loop if not doing GEN analysis
