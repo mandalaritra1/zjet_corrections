@@ -196,18 +196,14 @@ def _load_muon_sf_corrections(iov: str) -> correctionlib.CorrectionSet:
     return correctionlib.CorrectionSet.from_string(gzip.decompress(raw).decode("utf-8"))
 
 
-def GetPDFweights(df, var="nominal"):
-    ## determines the pdf up and down variations
+def GetPDFweights(df):
+    """Return (pdf_nominal, pdf_up, pdf_down) arrays for PDF variations."""
     pdf = ak.ones_like(df.Pileup.nTrueInt)
-    if ("LHEPdfWeight" in ak.fields(df)):
-        pdfUnc = ak.std(df.LHEPdfWeight,axis=1)/ak.mean(df.LHEPdfWeight,axis=1)
+    if "LHEPdfWeight" in ak.fields(df):
+        pdfUnc = ak.std(df.LHEPdfWeight, axis=1) / ak.mean(df.LHEPdfWeight, axis=1)
     else:
-        pdfUnc = 0
-    if var == "up":
-        pdf = pdf + pdfUnc
-    elif var == "down":
-        pdf = pdf - pdfUnc
-    return pdf
+        pdfUnc = ak.zeros_like(pdf)
+    return pdf, pdf + pdfUnc, pdf - pdfUnc
 
 def GetL1PreFiringWeight(IOV, df):
     """Return (nominal, up, down) L1 prefiring weights from the event record."""
@@ -217,6 +213,23 @@ def GetL1PreFiringWeight(IOV, df):
 
     weights = df["L1PreFiringWeight"]
     return weights["Nom"], weights["Up"], weights["Dn"]
+
+def GetQ2weights(df, var="nominal"):
+    q2 = ak.ones_like(df.event)
+    q2_up = ak.ones_like(df.event)
+    q2_down = ak.ones_like(df.event)
+    if ("LHEScaleWeight" in ak.fields(df)):
+        if ak.all(ak.num(df.LHEScaleWeight, axis=1) == 9):
+            nom = df.LHEScaleWeight[:, 4]
+            scales = df.LHEScaleWeight[:, [0, 1, 3, 5, 7, 8]]
+            q2_up = ak.max(scales, axis=1) / nom
+            q2_down = ak.min(scales, axis=1) / nom
+        elif ak.all(ak.num(df.LHEScaleWeight, axis=1) == 8):
+            scales = df.LHEScaleWeight[:, [0, 1, 3, 4, 6, 7]]
+            q2_up = ak.max(scales, axis=1)
+            q2_down = ak.min(scales, axis=1)
+
+    return q2, q2_up, q2_down
     
 def GetEleTrigEff(IOV, lep0pT, lep0eta):
     """Return (nominal, up, down) electron trigger efficiencies."""
@@ -436,8 +449,8 @@ def GetJetCorrections(FatJets, events, era, IOV, isData=False, uncertainties = N
     corrections_root = pkg_root.joinpath("corrections")
     jec_dir = corrections_root.joinpath("JEC", jec_tag)
     data_file = jec_dir.joinpath(f"{jec_tag}_L1FastJet_{AK_str}.jec.txt")
-    print("File exists check for JEC: ", str(data_file))
-    print(data_file.is_file())
+    #print("File exists check for JEC: ", str(data_file))
+    #print(data_file.is_file())
 
     with ExitStack() as stack:
         tmp_dir = Path(stack.enter_context(tempfile.TemporaryDirectory()))

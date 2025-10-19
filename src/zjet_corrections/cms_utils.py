@@ -1001,18 +1001,16 @@ def GetPDFweights(df, var="nominal"):
     return pdf
 
 def GetQ2weights(df, var="nominal"):
-
-
     q2 = ak.ones_like(df.event)
     q2Up = ak.ones_like(df.event)
     q2Down = ak.ones_like(df.event)
     if ("LHEScaleWeight" in ak.fields(df)):
-        if ak.all(ak.num(df.LHEScaleWeight)==9):
+        if ak.all(ak.num(df.LHEScaleWeight, axis=1)==9):
             nom = df.LHEScaleWeight[:,4]
             scales = df.LHEScaleWeight[:,[0,1,3,5,7,8]]
             q2Up = ak.max(scales,axis=1)/nom
             q2Down = ak.min(scales,axis=1)/nom 
-        elif ak.all(ak.num(df.LHEScaleWeight)==9):
+        elif ak.all(ak.num(df.LHEScaleWeight, axis=1)==8):
             scales = df.LHEScaleWeight[:,[0,1,3,4,6,7]]
             q2Up = ak.max(scales,axis=1)
             q2Down = ak.min(scales,axis=1)
@@ -1023,6 +1021,7 @@ def GetQ2weights(df, var="nominal"):
         return q2Down
     else:
         return q2
+
 
 
 def jmssf(IOV, FatJet,  var = ''):
