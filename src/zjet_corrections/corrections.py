@@ -250,24 +250,32 @@ def GetEleTrigEff(IOV, lep0pT, lep0eta):
     )
 
 
-def GetEleSF(IOV, wp, eta, pt, var=""):
-    """Return electron identification scale factors for the requested working point."""
+def GetEleSF(IOV, wp, eta, pt):
+    """Return (nominal, systup, systdown) electron identification scale factors."""
     counts = ak.num(pt)
     evaluator = _load_ele_sf_corrections(IOV)
 
     mask = pt > 20
     adj_pt = ak.where(mask, pt, 22)
 
-    sf_flat = evaluator["UL-Electron-ID-SF"].evaluate(
-        _ELE_SF_YEAR_LABEL[IOV],
-        "sf" + var,
-        wp,
-        np.array(ak.flatten(eta)),
-        np.array(ak.flatten(adj_pt)),
-    )
+    flat_eta = np.array(ak.flatten(eta))
+    flat_pt = np.array(ak.flatten(adj_pt))
 
-    sf = ak.unflatten(sf_flat, counts)
-    return ak.where(mask, sf, ak.ones_like(sf))
+    year = _ELE_SF_YEAR_LABEL[IOV]
+
+    sf_nom_flat = evaluator["UL-Electron-ID-SF"].evaluate(year, "sf", wp, flat_eta, flat_pt)
+    sf_up_flat  = evaluator["UL-Electron-ID-SF"].evaluate(year, "sfup", wp, flat_eta, flat_pt)
+    sf_down_flat= evaluator["UL-Electron-ID-SF"].evaluate(year, "sfdown", wp, flat_eta, flat_pt)
+
+    sf_nom  = ak.unflatten(sf_nom_flat, counts)
+    sf_up   = ak.unflatten(sf_up_flat, counts)
+    sf_down = ak.unflatten(sf_down_flat, counts)
+
+    return (
+        ak.where(mask, sf_nom, ak.ones_like(sf_nom)),
+        ak.where(mask, sf_up,  ak.ones_like(sf_up)),
+        ak.where(mask, sf_down,ak.ones_like(sf_down)),
+    )
 
 
 def GetMuonSF(IOV, corrset, abseta, pt):
@@ -586,3 +594,59 @@ def GetJetCorrections(FatJets, events, era, IOV, isData=False, uncertainties = N
     # print("Corrected jets object: ", corrected_jets.fields)
     #print("pt and mass before correction ", FatJets['pt_raw'], ", ", FatJets['mass_raw'], " and after correction ", corrected_jets["pt"], ", ", corrected_jets["mass"])
     return corrected_jets    
+
+def pad_none_lep(array):
+    """Pad an awkward array of leptons to have exactly two entries per event, filling with None."""
+    return ak.pad_none(array, 2, axis=1, clip=True)
+    
+def add_lepton_weights(events_j, twoReco_ee_sel, twoReco_mm_sel, weights, IOV):
+    elereco_nom, elereco_up, elereco_down = GetEleSF(IOV, "RecoAbove20", events_j.Electron.eta, events_j.Electron.pt)
+    elereco_nom, elereco_up, elereco_down = pad_none_lep(elereco_nom), pad_none_lep(elereco_up), pad_none_lep(elereco_down)       
+    elereco_nom = ak.where(twoReco_ee_sel, elereco_nom[:,0] * elereco_nom[:,1], 1.0)
+    elereco_up = ak.where(twoReco_ee_sel, elereco_up[:,0] * elereco_up[:,1], 1.0)
+    elereco_down = ak.where(twoReco_ee_sel, elereco_down[:,0] * elereco_down[:,1], 1.0)
+    weights.add(name = "elereco", weight = elereco_nom, weightUp = elereco_up, weightDown = elereco_down)
+
+    eleid_nom, eleid_up, eleid_down = GetEleSF(IOV, "Tight", events_j.Electron.eta, events_j.Electron.pt)
+    eleid_nom, eleid_up, eleid_down = pad_none_lep(eleid_nom), pad_none_lep(eleid_up), pad_none_lep(eleid_down)
+    eleid_nom = ak.where(twoReco_ee_sel, eleid_nom[:,0] * eleid_nom[:,1], 1.0)
+    eleid_up = ak.where(twoReco_ee_sel, eleid_up[:,0] * eleid_up[:,1], 1.0)
+    eleid_down = ak.where(twoReco_ee_sel, eleid_down[:,0] * eleid_down[:,1], 1.0)
+    weights.add(name = "eleid", weight = eleid_nom, weightUp = eleid_up, weightDown = eleid_down)
+
+    eletrig_nom, eletrig_up, eletrig_down = GetEleTrigEff(IOV, events_j.Electron.pt, events_j.Electron.eta)
+    eletrig_nom, eletrig_up, eletrig_down = pad_none_lep(eletrig_nom), pad_none_lep(eletrig_up), pad_none_lep(eletrig_down)
+    eletrig_nom = ak.where(twoReco_ee_sel, eletrig_nom[:,0] * eletrig_nom[:,1], 1.0)
+    eletrig_up = ak.where(twoReco_ee_sel, eletrig_up[:,0] * eletrig_up[:,1], 1.0)
+    eletrig_down = ak.where(twoReco_ee_sel, eletrig_down[:,0] * eletrig_down[:,1], 1.0)
+    weights.add(name = "eletrig", weight = eletrig_nom, weightUp = eletrig_up, weightDown = eletrig_down)
+
+
+    # Muon SFs in the same style as electrons
+    mureco_nom, mureco_up, mureco_down = GetMuonSF(IOV, "RECO", np.abs(events_j.Muon.eta), events_j.Muon.pt)
+    mureco_nom, mureco_up, mureco_down = pad_none_lep(mureco_nom), pad_none_lep(mureco_up), pad_none_lep(mureco_down)
+    mureco_nom = ak.where(twoReco_mm_sel, mureco_nom[:,0] * mureco_nom[:,1], 1.0)
+    mureco_up  = ak.where(twoReco_mm_sel, mureco_up[:,0]  * mureco_up[:,1],  1.0)
+    mureco_down= ak.where(twoReco_mm_sel, mureco_down[:,0]* mureco_down[:,1],1.0)
+    weights.add(name="mureco", weight=mureco_nom, weightUp=mureco_up, weightDown=mureco_down)
+
+    muid_nom, muid_up, muid_down = GetMuonSF(IOV, "ID", np.abs(events_j.Muon.eta), events_j.Muon.pt)
+    muid_nom, muid_up, muid_down = pad_none_lep(muid_nom), pad_none_lep(muid_up), pad_none_lep(muid_down)
+    muid_nom = ak.where(twoReco_mm_sel, muid_nom[:,0] * muid_nom[:,1], 1.0)
+    muid_up  = ak.where(twoReco_mm_sel, muid_up[:,0]  * muid_up[:,1],  1.0)
+    muid_down= ak.where(twoReco_mm_sel, muid_down[:,0]* muid_down[:,1],1.0)
+    weights.add(name="muid", weight=muid_nom, weightUp=muid_up, weightDown=muid_down)
+
+    muiso_nom, muiso_up, muiso_down = GetMuonSF(IOV, "ISO", np.abs(events_j.Muon.eta), events_j.Muon.pt)
+    muiso_nom, muiso_up, muiso_down = pad_none_lep(muiso_nom), pad_none_lep(muiso_up), pad_none_lep(muiso_down)
+    muiso_nom = ak.where(twoReco_mm_sel, muiso_nom[:,0] * muiso_nom[:,1], 1.0)
+    muiso_up  = ak.where(twoReco_mm_sel, muiso_up[:,0]  * muiso_up[:,1],  1.0)
+    muiso_down= ak.where(twoReco_mm_sel, muiso_down[:,0]* muiso_down[:,1],1.0)
+    weights.add(name="muiso", weight=muiso_nom, weightUp=muiso_up, weightDown=muiso_down)
+
+    mutrig_nom, mutrig_up, mutrig_down = GetMuonSF(IOV, "HLT", np.abs(events_j.Muon.eta), events_j.Muon.pt)
+    mutrig_nom, mutrig_up, mutrig_down = pad_none_lep(mutrig_nom), pad_none_lep(mutrig_up), pad_none_lep(mutrig_down)
+    mutrig_nom = ak.where(twoReco_mm_sel, mutrig_nom[:,0] * mutrig_nom[:,1], 1.0)
+    mutrig_up  = ak.where(twoReco_mm_sel, mutrig_up[:,0]  * mutrig_up[:,1],  1.0)
+    mutrig_down= ak.where(twoReco_mm_sel, mutrig_down[:,0]* mutrig_down[:,1],1.0)
+    weights.add(name="mutrig", weight=mutrig_nom, weightUp=mutrig_up, weightDown=mutrig_down)
