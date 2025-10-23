@@ -325,19 +325,56 @@ def GetMuonSF(IOV, corrset, abseta, pt):
         ak.unflatten(sf_down, counts),
     )
 
+from contextlib import ExitStack
+from importlib.resources import files, as_file
+from pathlib import Path
+
+# One global stack per worker process keeps extracted files alive.
+_resource_stack = ExitStack()
+
+def resource_path(package: str, *parts: str) -> str:
+    """
+    Return a real filesystem path for a resource inside `package`.
+    Works even when the package is a .zip (zipimport).
+    The underlying temp file is kept alive by the process-global ExitStack.
+    """
+    ref = files(package).joinpath(*parts)
+    path = _resource_stack.enter_context(as_file(ref))
+    return str(path)
+
+# def getLumiMaskRun2():
+
+
+#     golden_json_dir = files("zjet_corrections") / "corrections" / "goldenJsons"
+#     golden_json_path_2016 = golden_json_dir / "Cert_271036-284044_13TeV_Legacy2016_Collisions16_JSON.txt"
+#     golden_json_path_2017 = golden_json_dir / "Cert_294927-306462_13TeV_UL2017_Collisions17_GoldenJSON.txt"
+#     golden_json_path_2018 = golden_json_dir / "Cert_314472-325175_13TeV_Legacy2018_Collisions18_JSON.txt"
+
+#     masks = {
+#         "2016APV": LumiMask(str(golden_json_path_2016)),
+#         "2016": LumiMask(str(golden_json_path_2016)),
+#         "2017": LumiMask(str(golden_json_path_2017)),
+#         "2018": LumiMask(str(golden_json_path_2018)),
+#     }
+
+#     return masks
+
 def getLumiMaskRun2():
-    golden_json_dir = files("zjet_corrections") / "corrections" / "goldenJsons"
-    golden_json_path_2016 = golden_json_dir / "Cert_271036-284044_13TeV_Legacy2016_Collisions16_JSON.txt"
-    golden_json_path_2017 = golden_json_dir / "Cert_294927-306462_13TeV_UL2017_Collisions17_GoldenJSON.txt"
-    golden_json_path_2018 = golden_json_dir / "Cert_314472-325175_13TeV_Legacy2018_Collisions18_JSON.txt"
+    pkg = "zjet_corrections"  # package root
+
+    golden_json_path_2016 = resource_path(pkg, "corrections", "goldenJsons",
+        "Cert_271036-284044_13TeV_Legacy2016_Collisions16_JSON.txt")
+    golden_json_path_2017 = resource_path(pkg, "corrections", "goldenJsons",
+        "Cert_294927-306462_13TeV_UL2017_Collisions17_GoldenJSON.txt")
+    golden_json_path_2018 = resource_path(pkg, "corrections", "goldenJsons",
+        "Cert_314472-325175_13TeV_Legacy2018_Collisions18_JSON.txt")
 
     masks = {
-        "2016APV": LumiMask(str(golden_json_path_2016)),
-        "2016": LumiMask(str(golden_json_path_2016)),
-        "2017": LumiMask(str(golden_json_path_2017)),
-        "2018": LumiMask(str(golden_json_path_2018)),
+        "2016APV": LumiMask(golden_json_path_2016),
+        "2016"   : LumiMask(golden_json_path_2016),
+        "2017"   : LumiMask(golden_json_path_2017),
+        "2018"   : LumiMask(golden_json_path_2018),
     }
-
     return masks
 
 

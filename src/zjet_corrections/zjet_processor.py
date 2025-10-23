@@ -46,7 +46,7 @@ class QJetMassProcessor(processor.ProcessorABC):
     With "do_gen == True", will perform GEN selection and create response matrices. 
     Will always plot RECO level quantities. 
     '''
-    def __init__(self, do_gen = True, mode = "minimal", debug = False):
+    def __init__(self, do_gen = True, mode = "minimal",  debug = False, jet_systematics = None, systematics = None):
         '''
         Args:
             do_gen (bool): whether to run gen-level analysis and create response matrices
@@ -68,13 +68,20 @@ class QJetMassProcessor(processor.ProcessorABC):
             self._do_jk = False
         
 
+        if jet_systematics == None:
+            self.jet_systematics = ["nominal"]
+        else:
+            self.jet_systematics = jet_systematics
 
-        self.jet_systematics = ["nominal", "JERUp", "JERDown"]
-        self.systematics = ['nominal', 'puUp', 'puDown' , 'elerecoUp', 'elerecoDown', 
-                                'eleidUp', 'eleidDown', 'eletrigUp', 'eletrigDown', 'murecoUp', 'murecoDown', 
-                                'muidUp', 'muidDown', 'mutrigUp', 'mutrigDown', 'muisoUp', 'muisoDown',
-                                'pdfUp', 'pdfDown', 'q2Up', 'q2Down',
-                                'l1prefiringUp', 'l1prefiringDown'] 
+        if systematics == None:
+            self.systematics = ['nominal', 'puUp', 'puDown' , 'elerecoUp', 'elerecoDown', 
+                                    'eleidUp', 'eleidDown', 'eletrigUp', 'eletrigDown', 'murecoUp', 'murecoDown', 
+                                    'muidUp', 'muidDown', 'mutrigUp', 'mutrigDown', 'muisoUp', 'muisoDown',
+                                    'pdfUp', 'pdfDown', 'q2Up', 'q2Down',
+                                    'l1prefiringUp', 'l1prefiringDown'] 
+        else:
+            self.systematics = systematics
+        
 
         self.lepptcuts = [40,29] # [ele, mu]
         
@@ -141,6 +148,7 @@ class QJetMassProcessor(processor.ProcessorABC):
                 register_hist(self.hists, "response_matrix_g", [dataset_axis, channel_axis, ptreco_axis, mreco_axis, ptgen_axis, mgen_axis, syst_axis])
                 register_hist(self.hists, "ptjet_mjet_u_gen", [dataset_axis,channel_axis, ptgen_axis, mgen_axis, syst_axis])
                 register_hist(self.hists, "ptjet_mjet_g_gen", [dataset_axis,channel_axis, ptgen_axis, mgen_axis, syst_axis])
+                register_hist(self.hists, "ptz_mz_reco" , [dataset_axis, zmass_axis, pt_axis])
 
         
         self.hists["sumw"] = processor.defaultdict_accumulator(float)
@@ -163,10 +171,14 @@ class QJetMassProcessor(processor.ProcessorABC):
                else '2018'    if ( any(re.findall(r'UL18', dataset)) or any(re.findall(r'UL2018',    dataset)))
                else '2017'    if ( any(re.findall(r'UL17', dataset)) or any(re.findall(r'UL2017',    dataset)))
                else '2016')
+        self.IOV = IOV
 
         self.hists["cutflow"][f"{dataset}_all"] += len(events_all)
         self.hists["nev"][dataset] += len(events_all)
-        self.hists["sumw"][dataset] += ak.sum(events_all.genWeight)
+        if self._do_gen:
+            self.hists["sumw"][dataset] += ak.sum(events_all.genWeight)
+        else:
+            self.hists["sumw"][dataset] += len(events_all)
 
         index_list = np.arange(len(events_all))
         for jk_index in range(0, 10): ## loops from 0 to 9 in case do_jk flag is enabled, otherwise breaks at 0
@@ -183,29 +195,36 @@ class QJetMassProcessor(processor.ProcessorABC):
  
             sel = PackedSelection(dtype='uint64')
             
-            # if (self._do_gen):
-            #     era = None
-            #     firstidx = filename.find( "store/mc/" )
-            #     fname2 = filename[firstidx:]
-            #     fname_toks = fname2.split("/")
-            #     year = fname_toks[ fname_toks.index("mc") + 1]
-            #     ht_bin = fname_toks[ fname_toks.index("mc") + 2]
+            if (self._do_gen):
+                era = None
+                firstidx = filename.find( "store/mc/" )
+                fname2 = filename[firstidx:]
+                fname_toks = fname2.split("/")
+                year = fname_toks[ fname_toks.index("mc") + 1]
+                ht_bin = fname_toks[ fname_toks.index("mc") + 2]
 
-            #     ## Flag used for number of events
-            #     herwig = False
-            #     if 'herwig' in filename: herwig = True
-            # else:
-            #     firstidx = filename.find( "store/data/" )
-            #     fname2 = filename[firstidx:]
-            #     fname_toks = fname2.split("/")
-            #     era = fname_toks[ fname_toks.index("data") + 1]
-            #     channel = fname_toks[ fname_toks.index('NANOAOD') - 1]
-            #     ht_bin = 'all'
-            year = '2018'
-            era = 'UL2018'
-            ht_bin = 'all'
-            herwig = False
-            channel = 'SingleMuon'
+                ## Flag used for number of events
+                herwig = False
+                if 'herwig' in filename: herwig = True
+                self.herwig = herwig
+            if not self._do_gen:
+                firstidx = filename.find( "store/data/" )
+                fname2 = filename[firstidx:]
+                fname_toks = fname2.split("/")
+                era = fname_toks[ fname_toks.index("data") + 1]
+                channel = fname_toks[ fname_toks.index('NANOAOD') - 1]
+                ht_bin = 'all'
+                self.lumimasks = getLumiMaskRun2()
+                lumi_mask = self.lumimasks[IOV](events_all.run, events_all.luminosityBlock)
+
+                #events_all = events_all[lumi_mask]
+            self.logging.info(f"year: {year}, ht_bin: {ht_bin}, herwig: {herwig}")
+            # year = '2018'
+
+
+            # ht_bin = 'all'
+            # herwig = False
+            #channel = 'SingleMuon'
                 # lumi_mask = self.lumimasks[IOV](events_all.run, events_all.luminosityBlock)
                 # # print("RUN", events_all.run )
                 # # print("Lumi block", events_all.luminosityBlock )
@@ -239,7 +258,7 @@ class QJetMassProcessor(processor.ProcessorABC):
                     raise Exception("Dataset is incorrect, should have 2016, 2017, 2018: ", dataset)
                 sel.add("trigsel", trigsel)    
 
-                self.logging.debug("Trigger Selection ", ak.sum(sel.require(trigsel = True)))
+                self.logging.debug(f"Trigger Selection {ak.sum(sel.require(trigsel = True))}")
 
 
             events0 = events1 # fix because hassle to change all events1 to events0 below
@@ -304,19 +323,20 @@ class QJetMassProcessor(processor.ProcessorABC):
                                 "ecalBadCalibFilter"]}
             
 
-            pu_nom, pu_up, pu_down = get_pu_weights(events0, IOV)
-            self.logging.debug(f"PU weights (nom, up, down) : {pu_nom[:10]}")
-            
-            weights.add(name = "pu", weight = pu_nom, weightUp = pu_up, weightDown = pu_down)
-            pdf_nom, pdf_up, pdf_down = GetPDFweights(events0)
-            self.logging.debug(f"pdf weights (nom, up, down) : {pdf_nom[:10]}")
-            weights.add(name = "pdf", weight = pdf_nom, weightUp = pdf_up, weightDown = pdf_down)
-            l1prefire_nom, l1prefire_up, l1prefire_down = GetL1PreFiringWeight(IOV, events0)
-            self.logging.debug(f"L1 prefiring weights (nom, up, down) : {l1prefire_nom[:10]}")
-            weights.add(name = "l1prefiring", weight = l1prefire_nom, weightUp = l1prefire_up, weightDown = l1prefire_down)
-            q2_nom, q2_up, q2_down = GetQ2weights(events0)
-            self.logging.debug(f"Q2 weights (nom, up, down) : {q2_nom[:10]}")
-            weights.add(name = "q2", weight = q2_nom, weightUp = q2_up, weightDown = q2_down)
+            if self._do_gen:
+                pu_nom, pu_up, pu_down = get_pu_weights(events0, IOV)
+                self.logging.debug(f"PU weights (nom, up, down) : {pu_nom[:10]}")
+                
+                weights.add(name = "pu", weight = pu_nom, weightUp = pu_up, weightDown = pu_down)
+                pdf_nom, pdf_up, pdf_down = GetPDFweights(events0)
+                self.logging.debug(f"pdf weights (nom, up, down) : {pdf_nom[:10]}")
+                weights.add(name = "pdf", weight = pdf_nom, weightUp = pdf_up, weightDown = pdf_down)
+                l1prefire_nom, l1prefire_up, l1prefire_down = GetL1PreFiringWeight(IOV, events0)
+                self.logging.debug(f"L1 prefiring weights (nom, up, down) : {l1prefire_nom[:10]}")
+                weights.add(name = "l1prefiring", weight = l1prefire_nom, weightUp = l1prefire_up, weightDown = l1prefire_down)
+                q2_nom, q2_up, q2_down = GetQ2weights(events0)
+                self.logging.debug(f"Q2 weights (nom, up, down) : {q2_nom[:10]}")
+                weights.add(name = "q2", weight = q2_nom, weightUp = q2_up, weightDown = q2_down)
             
             # GEN Selection
             if self._do_gen:
@@ -406,6 +426,8 @@ class QJetMassProcessor(processor.ProcessorABC):
                             if MET_filters[IOV][i] in events0.Flag.fields])
             selectEvents = np.logical_and.reduce(selectEvents, axis=0) ## a passing event should pass "ALL" the MET filters
 
+            self.logging.debug("MET Filter applied")
+
             if ak.sum(selectEvents) < 1 :
                 print("No event passed the MET filters.")
                 return self.hists
@@ -442,20 +464,21 @@ class QJetMassProcessor(processor.ProcessorABC):
                     ],
                     "Muon"
                 )
-
+            self.logging.debug("Leptons Selected")
             z_reco = get_z_reco_selection(events0, sel, self.lepptcuts[0], self.lepptcuts[1], None, None)
             z_ptcut_reco = z_reco.pt > 90
             z_mcut_reco = (z_reco.mass > 71.) & (z_reco.mass < 111.)
             sel.add("z_ptcut_reco", z_ptcut_reco & (sel.require(twoReco_leptons = True) ))
             sel.add("z_mcut_reco", z_mcut_reco & (sel.require(twoReco_leptons = True) ))
 
-
+            self.logging.debug("Z Object Created")
             #### dr reco plots ###
 
             twoReco_ee_sel = sel.require(twoReco_ee = True)
             twoReco_mm_sel = sel.require(twoReco_mm = True)
             twoReco_ll_sel = sel.require(twoReco_leptons = True)
             corr_jets = GetJetCorrections(events1.FatJet, events1, era, IOV, isData = not self._do_gen, mode='AK8')  ###### correcting FatJet.mass
+            self.logging.debug("Jet Corrections Applied")
 
             for jet_syst in self.jet_systematics: # Start loop over jet systematics
                 self.logging.debug(f"Processing jet systematic: {jet_syst}")
@@ -572,33 +595,41 @@ class QJetMassProcessor(processor.ProcessorABC):
                     add_lepton_weights(events_j, twoReco_ee_sel, twoReco_mm_sel, weights, IOV)  
 
                     self.logging.info("Lepton weights added")      
+                sel_reco = sel.require(allsel_reco = True)
+                if jet_syst == "nominal":
+                    fill_hist(self.hists, "ptz_mz_reco", dataset =  dataset, mass = z_reco[sel_reco].mass, pt = z_reco[sel_reco].pt, weight = weights.weight()[sel_reco]) 
 
                 # Fill histograms
                 # GEN level histograms
                 channels = ['ee', 'mm']
-                print("Total reco events passing all selection: ", sel.require(allsel_reco = True).sum() )
-                print("Total reco events (ee channel) passing all selection: ", sel.require(allsel_reco = True, twoReco_ee = True).sum() )
-                print("Total reco events (mm channel) passing all selection: ", sel.require(allsel_reco = True, twoReco_mm = True).sum() )
+                self.logging.debug(f"Total reco events passing all selection: {sel.require(allsel_reco = True).sum()}",  )
+                self.logging.debug(f"Total reco events (ee channel) passing all selection: {sel.require(allsel_reco = True, twoReco_ee = True).sum()}",  )
+                self.logging.debug(f"Total reco events (mm channel) passing all selection: {sel.require(allsel_reco = True, twoReco_mm = True).sum()}",  )
+                self.logging.debug(f"Weights sample: {weights.weight()[sel_reco][:10]}" )
                 for channel in channels:
                     if channel == 'ee':
-                        
-                        sel_both = sel.require(allsel_reco = True, allsel_gen = True, twoGen_ee = True, twoReco_ee = True)
-                        sel_gen = sel.require(allsel_gen = True, twoGen_ee = True)
+                        if self._do_gen:
+                            sel_both = sel.require(allsel_reco = True, allsel_gen = True, twoGen_ee = True, twoReco_ee = True)
+                            sel_gen = sel.require(allsel_gen = True, twoGen_ee = True)
                         sel_reco = sel.require(allsel_reco = True, twoReco_ee = True)
                     else:
-                        sel_both = sel.require(allsel_reco = True, allsel_gen = True, twoGen_mm = True, twoReco_mm = True)
-                        sel_gen = sel.require(allsel_gen = True, twoGen_mm = True)
+                        if self._do_gen:
+                            sel_both = sel.require(allsel_reco = True, allsel_gen = True, twoGen_mm = True, twoReco_mm = True)
+                            sel_gen = sel.require(allsel_gen = True, twoGen_mm = True)
                         sel_reco = sel.require(allsel_reco = True, twoReco_mm = True)
 
                     if jet_syst == "nominal":
                         for syst in self.systematics:
                             if syst == "nominal":
-                                weights_gen =  weights.partial_weight('genWeight')[sel_gen]
+                                if self._do_gen:
+                                    weights_gen =  weights.partial_weight('genWeight')[sel_gen]
+                                    weights_both = weights.weight()[sel_both]
                                 weights_reco = weights.weight()[sel_reco]
-                                weights_both = weights.weight()[sel_both]
+                                
                             else:
                                 weights_reco = weights.weight(modifier=syst)[sel_reco]
-                                weights_both = weights.weight(modifier=syst)[sel_both]
+                                if self._do_gen:
+                                    weights_both = weights.weight(modifier=syst)[sel_both]
                             if self._do_gen:
                                 gen_jet_truth = gen_jet[sel_gen]
                                 groomed_gen_jet_truth = groomed_gen_jet[sel_gen]
@@ -663,14 +694,18 @@ class QJetMassProcessor(processor.ProcessorABC):
                                 self.logging.debug(f"mreco_g sample {mreco_g[:10]}")
                             fill_hist(self.hists, "ptjet_mjet_u_reco", dataset = dataset, channel = channel, ptreco = ptreco, mreco = mreco, systematic = syst, weight = weights_reco)
                             fill_hist(self.hists, "ptjet_mjet_g_reco", dataset = dataset, channel = channel, ptreco = ptreco_g, mreco = mreco_g, systematic = syst, weight = weights_reco_g)
+                            if not self._do_gen:
+                                break # Break on nominal when running over data
 
 
 
 
                     else: # jet syst is not nominal
-                        weights_gen =  weights.partial_weight(include=['genWeight'])[sel_gen]
+                        if self._do_gen:
+                            weights_gen =  weights.partial_weight(include=['genWeight'])[sel_gen]
+                            weights_both = weights.weight()[sel_both]
                         weights_reco = weights.weight()[sel_reco]
-                        weights_both = weights.weight()[sel_both]
+                        
 
                         reco_jet_meas = reco_jet[sel_reco]
                         ptreco = reco_jet_meas.pt
@@ -731,18 +766,38 @@ class QJetMassProcessor(processor.ProcessorABC):
         return self.hists
 
     def postprocess(self, accumulator):
-        hname_list = ["ptjet_mjet_u_reco", 'ptjet_mjet_g_reco', "ptjet_mjet_u_gen", "ptjet_mjet_g_gen", "response_matrix_u", "response_matrix_g"]
-        sumw = accumulator["sumw"]
+        hname_list = [key for key in accumulator.keys() if key not in ("cutflow", "nev", "sumw")]
 
+        #hname_list = ["ptjet_mjet_u_reco", 'ptjet_mjet_g_reco', "ptjet_mjet_u_gen", "ptjet_mjet_g_gen", "response_matrix_u", "response_matrix_g"]
+        sumw = accumulator["sumw"]
+        
         for hname in hname_list:
+            
             h = accumulator[hname]
-            for ds in h.axes['dataset']:
+            for i,ds in enumerate(h.axes['dataset']):
                 if ds.startswith("SingleMuon") or ds.startswith("EGamma") or ds.startswith("SingleElectron"):
                     continue
-                else:
-                    xs = 6077.22  # DY NLO
+                elif 'pythia' in ds:
+                    xsdb = {
+                        'HT-100to200': 139.2,
+                        'HT-1200to2500': 0.1305,
+                        'HT-200to400': 38.4,
+                        'HT-2500toInf': 0.002997,
+                        'HT-600to800': 1.258,
+                        'HT-400to600': 5.174,
+                        'HT-70to100': 140.0	,
+                        'HT-800to1200': 0.5598
+                    }
+                    
+                    lumi_db = {'UL16NanoAODv9':19.52 , 'UL16NanoAODAPVv9': 16.81 ,'UL17NanoAODv9': 41.48 , 'UL18NanoAODv9': 59.83}
+                    ht_bin = ds.split('_')[-1]
+                    iov = ds.split('_')[-2]
+                    xs = xsdb[ht_bin]
+                    lumi_fb = lumi_db[iov]
                     sw = sumw[ds]
-                    self.lumi_fb = 59.74  # 2018 lumi
+                    
+                    
+
                     if xs is None:
                         print(f"[postprocess] WARNING: missing XS_PB for dataset '{name}'. Skipping normalization.")
                         continue
@@ -750,10 +805,49 @@ class QJetMassProcessor(processor.ProcessorABC):
                         print(f"[postprocess] WARNING: sumw==0 for dataset '{name}'. Skipping normalization.")
                         continue
 
-                    scale = (xs * self.lumi_fb * 1000) / sw
-                    for i, name in enumerate(h.axes["dataset"]):
-                        h.view(flow=True)[i] *= scale
-                    self.logging.info(f"Scaled {hname} for dataset {ds} by {scale:.6f} = {xs} * {self.lumi_fb*1000} / {sw}")
+                    scale = (xs * lumi_fb * 1000) / sw
+                    h.view(flow=True)[i] *= scale
+                    if i==0:
+                        self.logging.info(f"Scaled {hname} for dataset {ds} by {scale:.6f} = {xs} * {lumi_fb*1000} / {sw}")
+
+
+                
+
+                    
+                elif 'herwig' in ds:
+                    xs = 5.036
+                    lumi_db = {'UL16NanoAODv9':19.52 , 'UL16NanoAODAPVv9': 16.81 ,'UL17NanoAODv9': 41.48 , 'UL18NanoAODv9': 59.83}
+                    iov = ds.split('_')[-2]
+                    lumi_fb = lumi_db[iov]
+                    sw = sumw[ds]
+                    if xs is None:
+                        print(f"[postprocess] WARNING: missing XS_PB for dataset '{name}'. Skipping normalization.")
+                        continue
+                    if sw == 0.0:
+                        print(f"[postprocess] WARNING: sumw==0 for dataset '{name}'. Skipping normalization.")
+                        continue
+                    scale = (xs * lumi_fb * 1000) / sw
+                    h.view(flow=True)[i] *= scale
+                    if i==0:
+                        self.logging.info(f"Scaled {hname} for dataset {ds} by {scale:.6f} = {xs} * {lumi_fb*1000} / {sw}")
+            grouping = defaultdict(list)
+            
+            for ds in h.axes["dataset"]:
+                if ds.startswith("SingleMuon") or ds.startswith("EGamma") or ds.startswith("SingleElectron"):
+                    grouping[ds].append(ds)
+                    continue
+    
+                iov = ds.split("_")[-2]
+                if "pythia" in ds:
+                    new_key = f"pythia_{iov}"
+                elif "herwig" in ds:
+                    new_key = f"herwig_{iov}"
+                else:
+                    new_key = f"MC_{iov}"
+                grouping[new_key].append(ds)
+        
+                # 3) Merge with the no-growth workaround (preserves axis order)
+            h = group(h, oldname="dataset", newname="dataset", grouping=dict(grouping))
             accumulator[hname] = h
 
         return accumulator
