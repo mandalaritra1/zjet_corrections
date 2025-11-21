@@ -215,9 +215,9 @@ def GetL1PreFiringWeight(IOV, df):
     return weights["Nom"], weights["Up"], weights["Dn"]
 
 def GetQ2weights(df, var="nominal"):
-    q2 = ak.ones_like(df.event)
-    q2_up = ak.ones_like(df.event)
-    q2_down = ak.ones_like(df.event)
+    q2 = ak.ones_like(df.event, dtype = float)
+    q2_up = ak.ones_like(df.event, dtype = float)
+    q2_down = ak.ones_like(df.event, dtype = float)
     if ("LHEScaleWeight" in ak.fields(df)):
         if ak.all(ak.num(df.LHEScaleWeight, axis=1) == 9):
             nom = df.LHEScaleWeight[:, 4]
@@ -687,3 +687,25 @@ def add_lepton_weights(events_j, twoReco_ee_sel, twoReco_mm_sel, weights, IOV):
     mutrig_up  = ak.where(twoReco_mm_sel, mutrig_up[:,0]  * mutrig_up[:,1],  1.0)
     mutrig_down= ak.where(twoReco_mm_sel, mutrig_down[:,0]* mutrig_down[:,1],1.0)
     weights.add(name="mutrig", weight=mutrig_nom, weightUp=mutrig_up, weightDown=mutrig_down)
+
+def HEMVeto(FatJets, runs):
+    ## from https://github.com/laurenhay/GluonJetMass/blob/main/python/corrections.py
+    ## Reference: https://hypernews.cern.ch/HyperNews/CMS/get/JetMET/2000.html
+    
+    runid = (runs >= 319077)
+    print(runid)
+    # print("Fat jet phi ", FatJets.phi)
+    # print("Fat jet phi length ", len(FatJets.phi))
+    # print("Fat jet eta ", FatJets.eta)
+    # print("Fat jet eta length ", len(FatJets.eta))
+    detector_region1 = ((FatJets.phi < -0.87) & (FatJets.phi > -1.57) &
+                       (FatJets.eta < -1.3) & (FatJets.eta > -2.5))
+    detector_region2 = ((FatJets.phi < -0.87) & (FatJets.phi > -1.57) &
+                       (FatJets.eta < -2.5) & (FatJets.eta > -3.0))
+    jet_selection    = ((FatJets.jetId > 1) & (FatJets.pt > 15))
+
+    vetoHEMFatJets = ak.any((detector_region1 & jet_selection & runid) ^ (detector_region2 & jet_selection & runid), axis=1)
+    #print("Number of hem vetoed jets: ", ak.sum(vetoHEMFatJets))
+    vetoHEM = ~(vetoHEMFatJets)
+    
+    return vetoHEM

@@ -16,6 +16,7 @@ from collections import defaultdict
 import gc
 import tokenize as tok
 import re
+import copy
 
 
 from coffea.lookup_tools.dense_lookup import dense_lookup
@@ -69,7 +70,18 @@ class QJetMassProcessor(processor.ProcessorABC):
         
 
         if jet_systematics == None:
-            self.jet_systematics = ["nominal"]
+            self.jet_systematics = ['nominal', 'JERUp', 'JERDown', 'JMSUp', 'JMSDown', 'JMRUp', 'JMRDown']
+            jes_systematics = ['JES_AbsoluteMPFBiasUp', 'JES_AbsoluteMPFBiasDown', 'JES_AbsoluteScaleUp', 'JES_AbsoluteScaleDown',
+                'JES_AbsoluteStatUp', 'JES_AbsoluteStatDown', 'JES_FlavorQCDUp', 'JES_FlavorQCDDown', 'JES_FragmentationUp',
+                'JES_FragmentationDown', 'JES_PileUpDataMCUp', 'JES_PileUpDataMCDown', 'JES_PileUpPtBBUp', 'JES_PileUpPtBBDown',
+                'JES_PileUpPtEC1Up', 'JES_PileUpPtEC1Down', 'JES_PileUpPtEC2Up', 'JES_PileUpPtEC2Down', 'JES_PileUpPtHFUp', 'JES_PileUpPtHFDown', 
+                'JES_PileUpPtRefUp', 'JES_PileUpPtRefDown', 'JES_RelativeFSRUp', 'JES_RelativeFSRDown', 'JES_RelativeJEREC1Up',
+                'JES_RelativeJEREC1Down', 'JES_RelativeJEREC2Up', 'JES_RelativeJEREC2Down', 'JES_RelativeJERHFUp', 'JES_RelativeJERHFDown',
+                'JES_RelativePtBBUp', 'JES_RelativePtBBDown', 'JES_RelativePtEC1Up', 'JES_RelativePtEC1Down', 'JES_RelativePtEC2Up', 'JES_RelativePtEC2Down',
+                'JES_RelativePtHFUp', 'JES_RelativePtHFDown', 'JES_RelativeBalUp', 'JES_RelativeBalDown', 'JES_RelativeSampleUp', 'JES_RelativeSampleDown', 
+                'JES_RelativeStatECUp', 'JES_RelativeStatECDown', 'JES_RelativeStatFSRUp', 'JES_RelativeStatFSRDown', 'JES_RelativeStatHFUp', 'JES_RelativeStatHFDown',
+                'JES_SinglePionECALUp', 'JES_SinglePionECALDown', 'JES_SinglePionHCALUp', 'JES_SinglePionHCALDown', 'JES_TimePtEtaUp', 'JES_TimePtEtaDown']
+            self.jet_systematics = self.jet_systematics + jes_systematics
         else:
             self.jet_systematics = jet_systematics
 
@@ -149,11 +161,18 @@ class QJetMassProcessor(processor.ProcessorABC):
                 register_hist(self.hists, "ptjet_mjet_u_gen", [dataset_axis,channel_axis, ptgen_axis, mgen_axis, syst_axis])
                 register_hist(self.hists, "ptjet_mjet_g_gen", [dataset_axis,channel_axis, ptgen_axis, mgen_axis, syst_axis])
                 register_hist(self.hists, "ptz_mz_reco" , [dataset_axis, zmass_axis, pt_axis])
+        if self._mode == "jk_mc":
+            register_hist(self.hists, "jk_response_matrix_u", [dataset_axis, ptreco_axis, mreco_axis, ptgen_axis, mgen_axis, binning.jackknife_axis])
+            register_hist(self.hists, "jk_response_matrix_g", [dataset_axis, ptreco_axis, mreco_axis, ptgen_axis, mgen_axis, binning.jackknife_axis])
+        if self._mode == "jk_data":
+            register_hist(self.hists, "jk_ptjet_mjet_g_reco", [dataset_axis,ptreco_axis, mreco_axis, binning.jackknife_axis])
+            register_hist(self.hists, "jk_ptjet_mjet_u_reco", [dataset_axis,ptreco_axis, mreco_axis, binning.jackknife_axis])
 
         
         self.hists["sumw"] = processor.defaultdict_accumulator(float)
         self.hists["nev"] = processor.defaultdict_accumulator(int)
         self.hists["cutflow"] = processor.defaultdict_accumulator(int)
+        self.logging.debug(f"Registered Histograms {self.hists.keys()}")
 
     @property
     def accumulator(self):
@@ -187,7 +206,7 @@ class QJetMassProcessor(processor.ProcessorABC):
                 self.logging.debug("Jackknife resampling not enabled, processing all events together.")
             if self._do_jk:
                 jk_sel = ak.where( (index_list % 10) == jk_index, False, True)
-                self.logging.debug("JK index ", jk_index, " events dropped ", ak.sum(~jk_sel) )
+                #self.logging.debug("JK index ", jk_index, " events dropped ", ak.sum(~jk_sel) )
                 events1 = events_all[jk_sel]
                 del jk_sel
 
@@ -218,7 +237,10 @@ class QJetMassProcessor(processor.ProcessorABC):
                 lumi_mask = self.lumimasks[IOV](events_all.run, events_all.luminosityBlock)
 
                 #events_all = events_all[lumi_mask]
-            self.logging.info(f"year: {year}, ht_bin: {ht_bin}, herwig: {herwig}")
+            if self._do_gen:
+                self.logging.info(f"year: {year}, ht_bin: {ht_bin}, herwig: {herwig}")
+            else:
+                self.logging.info(f"channel: {channel}")
             # year = '2018'
 
 
@@ -473,16 +495,26 @@ class QJetMassProcessor(processor.ProcessorABC):
 
             self.logging.debug("Z Object Created")
             #### dr reco plots ###
-
+            sel_nominal = copy.deepcopy(sel)
+            
             twoReco_ee_sel = sel.require(twoReco_ee = True)
             twoReco_mm_sel = sel.require(twoReco_mm = True)
             twoReco_ll_sel = sel.require(twoReco_leptons = True)
-            corr_jets = GetJetCorrections(events1.FatJet, events1, era, IOV, isData = not self._do_gen, mode='AK8')  ###### correcting FatJet.mass
+            corr_jets = GetJetCorrections(events0.FatJet, events0, era, IOV, isData = not self._do_gen, mode='AK8')  ###### correcting FatJet.mass
+            corr_jets = corr_jets[corr_jets.subJetIdx1 > -1]
+            corr_subjets = GetJetCorrections(events0.SubJet, events0, era, IOV, isData = not self._do_gen, mode = 'AK4')
+            corr_jets['msoftdrop'] =   (corr_subjets[corr_jets.subJetIdx1] + corr_subjets[corr_jets.subJetIdx2]).mass 
             self.logging.debug("Jet Corrections Applied")
-
+            self.logging.debug(f"Available Jet systematics {self.jet_systematics}")
+            
+            
+            
             for jet_syst in self.jet_systematics: # Start loop over jet systematics
                 self.logging.debug(f"Processing jet systematic: {jet_syst}")
                         # Apply jet corrections and show leading changes for quick inspection
+                if jet_syst != 'nominal':
+                    del sel
+                sel = copy.deepcopy(sel_nominal)
 
                 # corr_fatjets = GetJetCorrections(
                 #     events0.FatJet,
@@ -499,11 +531,52 @@ class QJetMassProcessor(processor.ProcessorABC):
                 
 
                 if jet_syst == "nominal":
-                    events_j = ak.with_field(events0, corr_jets, "FatJet")
+                    if self._do_gen:
+                        events_j = ak.with_field(events0, jmrsf(IOV, jmssf(IOV, corr_jets)), "FatJet")
+                    else:
+                        events_j = ak.with_field(events0, corr_jets , "FatJet")
                 elif jet_syst == "JERUp":
-                    events_j = ak.with_field(events0, corr_jets.JER.up, "FatJet")
+                    corr_jets_obj = corr_jets.JER.up
+                    corr_jets_obj['msoftdrop'] = (corr_subjets.JER.up[corr_jets.subJetIdx1] + corr_subjets.JER.up[corr_jets.subJetIdx2]).mass
+                    
+                    events_j = ak.with_field(events0, jmrsf(IOV, jmssf(IOV,corr_jets_obj)), "FatJet")
+                    del corr_jets_obj
                 elif jet_syst == "JERDown":
-                    events_j = ak.with_field(events0, corr_jets.JER.down, "FatJet")
+                    corr_jets_obj = corr_jets.JER.up
+                    corr_jets_obj['msoftdrop'] = (corr_subjets.JER.down[corr_jets.subJetIdx1] + corr_subjets.JER.down[corr_jets.subJetIdx2]).mass
+                    
+                    events_j = ak.with_field(events0, jmrsf(IOV, jmssf(IOV,corr_jets_obj)), "FatJet")
+                    del corr_jets_obj
+                elif jet_syst == "JMSUp":
+                    events_j = ak.with_field(events0,  jmrsf(IOV, jmssf(IOV,corr_jets, var = "up")) , "FatJet")
+                elif jet_syst == "JMSDown":
+                    events_j = ak.with_field(events0,  jmrsf(IOV, jmssf(IOV,corr_jets, var = "down")) , "FatJet")
+                elif jet_syst == "JMRUp":
+                    events_j = ak.with_field(events0,  jmrsf(IOV, jmssf(IOV,corr_jets), var = "up") , "FatJet")
+                elif jet_syst == "JMRDown":
+                    events_j = ak.with_field(events0,  jmrsf(IOV, jmssf(IOV,corr_jets), var = "down") , "FatJet")
+                
+                elif (jet_syst[-2:]=="Up" and "JES" in jet_syst):
+                    #print(jet_syst)
+                    field = jet_syst[:-2]
+                    #print(field)
+                    corr_jets_obj = corr_jets[field].up
+                    corr_jets_obj['msoftdrop'] = (corr_subjets[field].up[corr_jets.subJetIdx1] + corr_subjets[field].up[corr_jets.subJetIdx2]).mass
+                    
+                    events_j = ak.with_field(events0, jmrsf(IOV, jmssf(IOV,corr_jets_obj)), "FatJet")
+                    del corr_jets_obj
+                    
+                elif (jet_syst[-4:]=="Down" and "JES" in jet_syst):
+                    field = jet_syst[:-4]
+                    corr_jets_obj = corr_jets[field].down
+                    corr_jets_obj['msoftdrop'] = (corr_subjets[field].down[corr_jets.subJetIdx1] + corr_subjets[field].down[corr_jets.subJetIdx2]).mass
+                    
+                    events_j = ak.with_field(events0, jmrsf(IOV, jmssf(IOV,corr_jets_obj)), "FatJet")
+                    del corr_jets_obj
+                
+                else:
+                    print("{} is not considered".format(jet_syst))
+                    
 
                 presort_recojets = events_j.FatJet[
                     (events_j.FatJet.mass > 0) 
@@ -521,9 +594,11 @@ class QJetMassProcessor(processor.ProcessorABC):
 
 
                 recojets = events_j.FatJet
+                hem_sel = HEMVeto(recojets, events_j.run)
+                
 
                 sel.add("oneRecoJet", 
-                            ak.sum( (events_j.FatJet.pt > 0) & (np.abs(events_j.FatJet.eta) < 2.5)  & (events_j.FatJet.jetId == 6), axis=1 ) >= 1
+                            ak.sum( (events_j.FatJet.pt > 0) & (np.abs(events_j.FatJet.eta) < 2.5)  & (events_j.FatJet.jetId == 6) & hem_sel, axis=1 ) >= 1
                         )
 
 
@@ -533,6 +608,8 @@ class QJetMassProcessor(processor.ProcessorABC):
             
             
                 reco_jet = ak.firsts(recojets)
+
+                
 
             
                 #print("Special event reco_jet object pt", reco_jet[sel_spl].pt)
@@ -648,6 +725,7 @@ class QJetMassProcessor(processor.ProcessorABC):
 
                                 fill_hist(self.hists, "ptjet_mjet_u_gen", dataset = dataset, channel = channel, ptgen = ptgen, mgen = mgen, weight = weights_gen, systematic = syst)
                                 fill_hist(self.hists, "ptjet_mjet_g_gen", dataset = dataset, channel = channel, ptgen = ptgen, mgen = mgen_g, weight = weights_gen, systematic = syst)
+
                                 gen_jet_both = gen_jet[sel_both]
                                 reco_jet_both = reco_jet[sel_both]
                                 groomed_gen_jet_both = groomed_gen_jet[sel_both]
@@ -669,7 +747,9 @@ class QJetMassProcessor(processor.ProcessorABC):
                                 ptreco_both_g = ptreco_both_g[~ak.is_none(ptreco_both_g)]
                                 mreco_both_g = reco_jet_both.msoftdrop
                                 mreco_both_g = mreco_both_g[~ak.is_none(mreco_both_g)]
-                                fill_hist(self.hists, "response_matrix_g", dataset = dataset, channel = channel, ptreco = ptreco_both_g, mreco = mreco_both_g, ptgen = ptgen_both, mgen = mgen_both_g, systematic = syst, weight = weights_both)
+                                fill_hist(self.hists, "response_matrix_g", dataset = dataset, channel = channel, ptreco = ptreco_both_g, mreco = mreco_both_g, ptgen = ptgen_both, mgen = mgen_both_g,systematic = syst, weight = weights_both)
+                                fill_hist(self.hists, "jk_response_matrix_u",dataset = dataset, ptreco = ptreco_both, mreco = mreco_both, ptgen = ptgen_both, mgen = mgen_both, jk = jk_index, weight = weights_both)
+                                fill_hist(self.hists, "jk_response_matrix_g", dataset = dataset, ptreco = ptreco_both_g, mreco = mreco_both_g, ptgen = ptgen_both, mgen = mgen_both_g, jk = jk_index, weight = weights_both)
 
                 
                             reco_jet_meas = reco_jet[sel_reco]
@@ -694,6 +774,10 @@ class QJetMassProcessor(processor.ProcessorABC):
                                 self.logging.debug(f"mreco_g sample {mreco_g[:10]}")
                             fill_hist(self.hists, "ptjet_mjet_u_reco", dataset = dataset, channel = channel, ptreco = ptreco, mreco = mreco, systematic = syst, weight = weights_reco)
                             fill_hist(self.hists, "ptjet_mjet_g_reco", dataset = dataset, channel = channel, ptreco = ptreco_g, mreco = mreco_g, systematic = syst, weight = weights_reco_g)
+                            
+                            fill_hist( self.hists, "jk_ptjet_mjet_u_reco", dataset = dataset,ptreco = ptreco, mreco = mreco, systematic = syst, weight = weights_reco, jk = jk_index)
+                            fill_hist( self.hists, "jk_ptjet_mjet_g_reco", dataset = dataset,ptreco = ptreco_g, mreco = mreco_g, systematic = syst, weight = weights_reco_g, jk = jk_index)
+                            
                             if not self._do_gen:
                                 break # Break on nominal when running over data
 
@@ -752,8 +836,13 @@ class QJetMassProcessor(processor.ProcessorABC):
                             mreco_both_g = mreco_both_g[~ak.is_none(mreco_both_g)]
                             weights_both_g = weights_both[~ak.is_none(mreco_both_g)]
                             fill_hist(self.hists, "response_matrix_g", dataset = dataset, channel = channel, ptreco = ptreco_both_g, mreco = mreco_both_g, ptgen = ptgen_both, mgen = mgen_both_g, systematic = jet_syst, weight = weights_both_g)
+                            #register_hist(self.hists, "jk_response_matrix_u", [ ptreco_axis, mreco_axis, ptgen_axis, mgen_axis, binning.jackknife_axis])
+                            fill_hist(self.hists, "jk_response_matrix_u",dataset = dataset, ptreco = ptreco_both, mreco = mreco_both, ptgen = ptgen_both, mgen = mgen_both, jk = jk_index, weight = weights_both)
+                            fill_hist(self.hists, "jk_response_matrix_g",dataset = dataset, ptreco = ptreco_both_g, mreco = mreco_both_g, ptgen = ptgen_both, mgen = mgen_both_g, jk = jk_index, weight = weights_both_g)
                             # End of channels loop
+                
                 if not self._do_gen:
+                    self.logging.debug("This break condition is true")
                     break  # Exit the jet_syst loop if not doing GEN analysis
 
             if not self._do_jk:
@@ -830,6 +919,50 @@ class QJetMassProcessor(processor.ProcessorABC):
                     h.view(flow=True)[i] *= scale
                     if i==0:
                         self.logging.info(f"Scaled {hname} for dataset {ds} by {scale:.6f} = {xs} * {lumi_fb*1000} / {sw}")
+                elif 'powheg' in ds:
+                    xs = 1976.0
+                    lumi_db = {'UL16NanoAODv9':19.52 , 'UL16NanoAODAPVv9': 16.81 ,'UL17NanoAODv9': 41.48 , 'UL18NanoAODv9': 59.83}
+                    iov = ds.split('_')[-2]
+                    lumi_fb = lumi_db[iov]
+                    sw = sumw[ds]
+                    if xs is None:
+                        print(f"[postprocess] WARNING: missing XS_PB for dataset '{name}'. Skipping normalization.")
+                        continue
+                    if sw == 0.0:
+                        print(f"[postprocess] WARNING: sumw==0 for dataset '{name}'. Skipping normalization.")
+                        continue
+                    scale = (xs * lumi_fb * 1000) / sw
+                    h.view(flow=True)[i] *= scale
+                    if i==0:
+                        self.logging.info(f"Scaled {hname} for dataset {ds} by {scale:.6f} = {xs} * {lumi_fb*1000} / {sw}")
+                elif ('st' in ds) or ('ST' in ds):
+                    xsdb = {'st_tW_antitop': 34.97,
+                                'st_tW_top': 34.91	,
+                                'ST_t-channel_antitop': 67.93,
+                                'ST_t-channel_top':   69.09}
+                    if ds.startswith('st_tW_antitop'):
+                        xs = xsdb['st_tW_antitop']
+                    elif ds.startswith('st_tW_top'):
+                        xs = xsdb['st_tW_antitop']
+                    elif ds.startswith('ST_t-channel_antitop'):
+                        xs = xsdb['ST_t-channel_antitop']
+                    else:
+                        xs = xsdb['ST_t-channel_top']
+                    lumi_db = {'UL16NanoAODv9':19.52 , 'UL16NanoAODAPVv9': 16.81 ,'UL17NanoAODv9': 41.48 , 'UL18NanoAODv9': 59.83}
+                    iov = ds.split('_')[-1]
+                    # self.logging.debug(f"{iov}")
+                    lumi_fb = lumi_db[iov]
+                    sw = sumw[ds]
+                    if xs is None:
+                        print(f"[postprocess] WARNING: missing XS_PB for dataset '{name}'. Skipping normalization.")
+                        continue
+                    if sw == 0.0:
+                        print(f"[postprocess] WARNING: sumw==0 for dataset '{name}'. Skipping normalization.")
+                        continue
+                    scale = (xs * lumi_fb * 1000) / sw
+                    h.view(flow=True)[i] *= scale
+                    if i==0:
+                        self.logging.info(f"Scaled {hname} for dataset {ds} by {scale:.6f} = {xs} * {lumi_fb*1000} / {sw}")
             grouping = defaultdict(list)
             
             for ds in h.axes["dataset"]:
@@ -837,12 +970,18 @@ class QJetMassProcessor(processor.ProcessorABC):
                     grouping[ds].append(ds)
                     continue
     
-                iov = ds.split("_")[-2]
+                
                 if "pythia" in ds:
+                    iov = ds.split("_")[-2]
                     new_key = f"pythia_{iov}"
                 elif "herwig" in ds:
+                    iov = ds.split("_")[-2]
                     new_key = f"herwig_{iov}"
+                elif "st" in ds:
+                    iov = ds.split("_")[-1]
+                    new_key = f"ST_{iov}"
                 else:
+                    iov = ds.split("_")[-1]
                     new_key = f"MC_{iov}"
                 grouping[new_key].append(ds)
         
