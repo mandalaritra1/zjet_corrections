@@ -104,14 +104,14 @@ class util_binning :
 
         # Negative counterpart of mgen_over_pt_axis
         self.mgen_over_pt_axis = hist.axis.Variable(
-            [-10, -5, -4.5, -4, -3.5, -3, -2.5, -2, -1.5, -1, -0.5, 0],
+            [-10, -6, -5, -4.5, -4, -3.5, -3, -2.5, -2, -1.5, -1, -0.5, 0],
             name='mpt_gen', label=r'$-\rho$'
         )
         
         # Negative counterpart of mreco_over_pt_axis
         self.mreco_over_pt_axis = hist.axis.Variable(
-            [-10, -7.5, -5, -4.75, -4.5, -4.25, -4, -3.75, -3.5, -3.25, -3,
-             -2.75, -2.5, -2.25, -2, -1.75, -1.5, -1.25, -1, -0.75, -0.5, -0.25, 0],
+            [-10, -8.0, -6, -5.5, -5, -4.75, -4.5, -4.25, -4, -3.75, -3.5, -3.25,
+             -3, -2.75, -2.5, -2.25, -2, -1.75, -1.5, -1.25, -1, -0.75, -0.5, -0.25, 0],
             name='mpt_reco', label=r'$-\rho$ (Detector)'
         )
         #self.ptgen_axis = hist.axis.Variable([200,260,350,460,550,650,760,13000], name="ptgen", label=r"p_{T,RECO} (GeV)")   
@@ -125,11 +125,11 @@ class util_binning :
         self.ptgen_axis = hist.axis.Variable([0,  200.,   290.,   400.,    13000.], name="ptgen", label=r"$p_{T,GEN}$ (GeV)")  
         self.ptreco_axis = hist.axis.Variable([0, 200.,   290.,   400.,    13000.], name="ptreco", label=r"$p_{T,RECO}$ (GeV)")
 
-        self.mcut_reco_u_axis = hist.axis.Variable([ 0, 20, 10000], name="mreco", label=r"Mass (GeV)" )
-        self.mcut_reco_g_axis = hist.axis.Variable([ 0, 10, 10000], name="mreco", label=r"Mass (GeV)" )
+        self.mcut_reco_u_axis = hist.axis.Variable([ 0, 20, 1000], name="mreco", label=r"Mass (GeV)" )
+        self.mcut_reco_g_axis = hist.axis.Variable([ 0, 10, 1000], name="mreco", label=r"Mass (GeV)" )
 
-        self.mcut_gen_u_axis = hist.axis.Variable([ 0, 20, 10000], name="mgen", label=r"Mass (GeV)" )
-        self.mcut_gen_g_axis = hist.axis.Variable([ 0, 10, 10000], name="mgen", label=r"Mass (GeV)" )
+        self.mcut_gen_u_axis = hist.axis.Variable([ 0, 20, 1000], name="mgen", label=r"Mass (GeV)" )
+        self.mcut_gen_g_axis = hist.axis.Variable([ 0, 10, 1000], name="mgen", label=r"Mass (GeV)" )
 
         self.ptgen_axis_fine = hist.axis.Variable([  200., 210,  220, 230, 240, 260., 280, 300, 320, 340,  350., 370, 390, 410, 430, 450, 500, 550, 600, 650, 700, 800, 900, 1000, 13000.], name="ptgen_fine", label=r"$p_{T,GEN}$ (GeV)")  
         
@@ -151,7 +151,7 @@ class util_binning :
         self.diff_axis_large = hist.axis.Regular(100, -50, 50, name="diff", label=r"$\Delta$ [GeV]")
         self.zmass_axis = hist.axis.Regular(40, 70, 110, name="mass", label=r"$m$ [GeV]")
         self.pt_axis = hist.axis.Regular(150, 0, 1500, name="pt", label=r"$p_{T}$ [GeV]")                
-        self.frac_axis = hist.axis.Regular(200, -1.5, 1.5, name="frac", label=r"Fraction")                
+        self.frac_axis = hist.axis.Regular(200, -3, 3, name="frac", label=r"Fraction")                
         self.dr_axis = hist.axis.Regular(150, 0, 6.0, name="dr", label=r"$\Delta R$")
         self.dr_fine_axis = hist.axis.Regular(150, 0, 1.5, name="dr", label=r"$\Delta R$")
         self.dphi_axis = hist.axis.Regular(150, -2*np.pi, 2*np.pi, name="dphi", label=r"$\Delta \phi$")
