@@ -105,14 +105,14 @@ class util_binning :
         # Negative counterpart of mgen_over_pt_axis
         self.mgen_over_pt_axis = hist.axis.Variable(
             [-10, -6, -5, -4.5, -4, -3.5, -3, -2.5, -2, -1.5, -1, -0.5, 0],
-            name='mpt_gen', label=r'$-\rho$'
+            name='mpt_gen', label=r'$\log(\rho^2)$'
         )
         
         # Negative counterpart of mreco_over_pt_axis
         self.mreco_over_pt_axis = hist.axis.Variable(
             [-10, -8.0, -6, -5.5, -5, -4.75, -4.5, -4.25, -4, -3.75, -3.5, -3.25,
              -3, -2.75, -2.5, -2.25, -2, -1.75, -1.5, -1.25, -1, -0.75, -0.5, -0.25, 0],
-            name='mpt_reco', label=r'$-\rho$ (Detector)'
+            name='mpt_reco', label=r'$\log(\rho^2)$ (Detector)'
         )
         #self.ptgen_axis = hist.axis.Variable([200,260,350,460,550,650,760,13000], name="ptgen", label=r"p_{T,RECO} (GeV)")   
 
@@ -146,7 +146,7 @@ class util_binning :
         self.dataset_axis = hist.axis.StrCategory([], growth=True, name="dataset", label="Primary dataset")
         self.lep_axis = hist.axis.StrCategory(["ee", "mm"], name="lep")
         self.n_axis = hist.axis.Regular(10, 0, 10, name="n", label=r"Number")
-        self.mass_axis = hist.axis.Regular(100, 0, 1000, name="mass", label=r"$m$ [GeV]")
+        self.mass_axis = hist.axis.Regular(100, 0, 500, name="mass", label=r"$m$ [GeV]")
         self.diff_axis = hist.axis.Regular(100, -20, 20, name="diff", label=r"$\Delta$ [GeV]")
         self.diff_axis_large = hist.axis.Regular(100, -50, 50, name="diff", label=r"$\Delta$ [GeV]")
         self.zmass_axis = hist.axis.Regular(40, 70, 110, name="mass", label=r"$m$ [GeV]")
@@ -155,9 +155,10 @@ class util_binning :
         self.dr_axis = hist.axis.Regular(150, 0, 6.0, name="dr", label=r"$\Delta R$")
         self.dr_fine_axis = hist.axis.Regular(150, 0, 1.5, name="dr", label=r"$\Delta R$")
         self.dphi_axis = hist.axis.Regular(150, -2*np.pi, 2*np.pi, name="dphi", label=r"$\Delta \phi$")
-        self.eta_axis = hist.axis.Regular(40, -5, 5, name="eta", label=r"$ \eta$")
+        self.eta_axis = hist.axis.Regular(40, -2.5, 2.5, name="eta", label=r"$ \eta$")
+        self.y_axis = hist.axis.Regular(60, -5, 5, name="y", label="Rapidity $y$")
         self.phi_axis = hist.axis.Regular(40, -5, 5, name="phi", label=r"$ \phi$")
-        self.ptfine_axis = hist.axis.Regular(20, 200, 500, name="pt", label=r"p_{T,RECO} (GeV)")
+        self.ptfine_axis = hist.axis.Regular(20, 200, 500, name="pt", label=r"p_{T,RECO} [GeV]")
         self.jackknife_axis = hist.axis.IntCategory([], growth = True, name = 'jk', label = "Jackknife categories" )
         
         self.syst_axis=hist.axis.StrCategory([],growth = True, name = "systematic", label = "Systematic Uncertainty")

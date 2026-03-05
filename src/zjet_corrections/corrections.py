@@ -15,6 +15,7 @@ from coffea.lookup_tools.correctionlib_wrapper import correctionlib_wrapper
 from coffea.lookup_tools import extractor
 
 from coffea.jetmet_tools import JECStack, CorrectedJetsFactory
+from .roccor import RoccoR
 
 # Map your IOV to the key used inside the JSON
 _HNAME = {
@@ -125,6 +126,64 @@ def _resolve_jec_tags(iov: str):
         )
     raise ValueError(f"Unsupported IOV '{iov}' for jet energy corrections")
 
+class PtRhoWeighter:
+    def __init__(self, npz_path: str):
+        dat = np.load(npz_path, allow_pickle=True)
+        self.pt_edges = np.asarray(dat["pt_edges"], dtype=float)
+        self.rho_grids = dat["rho_grids"]   # object array
+        self.w_grids = dat["w_grids"]       # object array
+
+    def _pt_bin(self, pt: float) -> int:
+        k = np.searchsorted(self.pt_edges, pt, side="right") - 1
+        return int(np.clip(k, 0, len(self.pt_edges) - 2))
+
+    def weight(self, pt: float, rho: float) -> float:
+        k = self._pt_bin(pt)
+        x = np.asarray(self.rho_grids[k], dtype=float)
+        w = np.asarray(self.w_grids[k], dtype=float)
+        return float(np.interp(rho, x, w, left=w[0], right=w[-1]))
+
+    def weight_array(self, pt_arr, rho_arr):
+        pt_arr = np.asarray(pt_arr, dtype=float)
+        rho_arr = np.asarray(rho_arr, dtype=float)
+        out = np.empty_like(rho_arr, dtype=float)
+
+        k_arr = np.searchsorted(self.pt_edges, pt_arr, side="right") - 1
+        k_arr = np.clip(k_arr, 0, len(self.pt_edges) - 2)
+
+        for k in range(len(self.pt_edges) - 1):
+            mask = (k_arr == k)
+            if not np.any(mask):
+                continue
+            x = np.asarray(self.rho_grids[k], dtype=float)
+            w = np.asarray(self.w_grids[k], dtype=float)
+            out[mask] = np.interp(rho_arr[mask], x, w, left=w[0], right=w[-1])
+
+        return out
+        
+from importlib.resources import files, as_file
+
+@lru_cache(maxsize=None)
+def get_herwig_weight_g() -> PtRhoWeighter:
+    resource = files("zjet_corrections") / "corrections" / "spline_groomed.npz"
+    with as_file(resource) as p:          # p is a real pathlib.Path on disk
+        return PtRhoWeighter(p)
+
+@lru_cache(maxsize=None)
+def get_herwig_weight_u() -> PtRhoWeighter:
+    resource = files("zjet_corrections") / "corrections" / "spline_ungroomed.npz"
+    with as_file(resource) as p:
+        return PtRhoWeighter(p)
+
+@lru_cache(maxsize=None)
+def get_rocc_corrections(iov=None) -> RoccoR:
+    # you can map iov -> filename later if you want
+    resource = (
+        files("zjet_corrections")
+        / "corrections" / "muonSF" / "UL2016" / "RoccoR2016aUL.txt"
+    )
+    with as_file(resource) as p:
+        return RoccoR(str(p))   # str is safe; RoccoR opens the path
 
 @lru_cache(maxsize=None)
 def _load_jme_corrections(iov: str, mode: str):
@@ -214,6 +273,16 @@ def GetL1PreFiringWeight(IOV, df):
     weights = df["L1PreFiringWeight"]
     return weights["Nom"], weights["Up"], weights["Dn"]
 
+
+def GetPSweights(df, shower = "ISR"):
+    """ Return nominal, up, down weights for ISR or FSR """
+    if shower == "ISR":
+        ones = ak.ones_like(df.event)
+        return ones, df.PSWeight[:,0], df.PSWeight[:,2]
+    elif shower == "FSR":
+        ones = ak.ones_like(df.event)
+        return ones, df.PSWeight[:,1], df.PSWeight[:,3]
+
 def GetQ2weights(df, var="nominal"):
     q2 = ak.ones_like(df.event, dtype = float)
     q2_up = ak.ones_like(df.event, dtype = float)
@@ -248,8 +317,63 @@ def GetEleTrigEff(IOV, lep0pT, lep0eta):
         ak.unflatten(sf_up, counts),
         ak.unflatten(sf_down, counts),
     )
+    
+# def getRapidity(p4):
+#     return 0.5 * np.log(( p4.energy + p4.pz ) / ( p4.energy - p4.pz ))
+def getRapidity(obj, eps=1e-12):
+    pt, eta, m = obj.pt, obj.eta, obj.mass
+    pz = pt * np.sinh(eta)
+    E  = np.sqrt((pt * np.cosh(eta))**2 + m**2)
+    # print("[IN FUNCTION] Computing rapidity")
+    # print("[IN FUNCTION] Energy ", E)
+    # print("[IN FUNCTION] pz", pz)
+
+    num = E + pz
+    den = E - pz
+    # print("[IN FUNCTION] num ", num)
+    # print("[IN FUNCTION] den ", den)
+    den = ak.where(den > eps, den, np.nan)
+    num = ak.where(num > eps, num, np.nan)
+    rapidity = 0.5 * np.log(num / den)
+    # print("[IN FUNCTION] Rapidity ", rapidity)
+    # print("[IN FUNCTION] Eta ", eta)
+    return rapidity
+    
 
 
+
+
+# def compute_rapidity(obj):
+#     """
+#     Compute rapidity for NanoAOD objects with pt, eta, phi, mass
+#     Works with awkward arrays (coffea NanoEvents).
+#     """
+
+#     pt = obj.pt
+#     eta = obj.eta
+#     mass = obj.mass
+
+#     pz = pt * np.sinh(eta)
+#     energy = np.sqrt((pt * np.cosh(eta))**2 + mass**2)
+
+#     y = 0.5 * np.log((energy + pz) / (energy - pz))
+#     return y
+def compute_rapidity(obj, eps=1e-12):
+    pt = obj.pt
+    eta = obj.eta
+    m = obj.mass
+
+    pz = pt * np.sinh(eta)
+    E  = np.sqrt((pt * np.cosh(eta))**2 + m**2)
+
+    num = E + pz
+    den = E - pz
+
+    # protect against den <= 0 (or tiny) from weird values / rounding
+    den = ak.where(den > eps, den, np.nan)
+    num = ak.where(num > eps, num, np.nan)
+
+    return 0.5 * np.log(num / den)
 def GetEleSF(IOV, wp, eta, pt):
     """Return (nominal, systup, systdown) electron identification scale factors."""
     counts = ak.num(pt)
@@ -303,10 +427,10 @@ def GetMuonSF(IOV, corrset, abseta, pt):
         else:
             raise ValueError(f"Unsupported IOV '{IOV}' for HLT muon scale factors")
     elif corrset == "ID":
-        hname = "NUM_MediumID_DEN_TrackerMuons"
+        hname = "NUM_TightID_DEN_TrackerMuons"
         adj_pt = ak.where(adj_pt < 15, 15.1, adj_pt)
     elif corrset == "ISO":
-        hname = "NUM_TightRelIso_DEN_MediumID"
+        hname = "NUM_TightRelIso_DEN_TightIDandIPCut"
         adj_pt = ak.where(adj_pt < 15, 15.1, adj_pt)
     else:
         raise ValueError(f"Unsupported corrset '{corrset}' for muon scale factors")

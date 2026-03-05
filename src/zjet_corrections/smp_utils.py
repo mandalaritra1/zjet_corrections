@@ -38,7 +38,7 @@ def get_z_gen_selection( events, selection, ptcut_e, ptcut_m, ptcut_e2=None, ptc
     # print("Sum of pdg", ak.sum(events.GenDressedLepton[:, :2].pdgId , axis = 1) ==0)
     # print("two gen dressed ", ak.sum(isGenElectron, axis=1) >= 2)
     selection.add("twoGen_ee", 
-                  (ak.sum(isGenElectron, axis=1) >= 2) & 
+                  (ak.sum(isGenElectron, axis=1) == 2) & 
                   (ak.all(events.GenDressedLepton.pt > ptcut_e2, axis=1)) & 
                   (ak.max(events.GenDressedLepton.pt, axis=1) > ptcut_e) &
                   (ak.all( np.abs(events.GenDressedLepton.eta) < 2.5, axis=1)) & 
@@ -46,7 +46,7 @@ def get_z_gen_selection( events, selection, ptcut_e, ptcut_m, ptcut_e2=None, ptc
                   #(ak.sum(gen_charge, axis=1) == 0)
                  )
     selection.add("twoGen_mm", 
-                  (ak.sum(isGenMuon, axis=1) >= 2) & 
+                  (ak.sum(isGenMuon, axis=1) == 2) & 
                   (ak.all(events.GenDressedLepton.pt > ptcut_m2, axis=1)) & 
                   (ak.max(events.GenDressedLepton.pt, axis=1) > ptcut_m) &
                   (ak.all( np.abs(events.GenDressedLepton.eta) < 2.5, axis=1)) & 
@@ -76,7 +76,7 @@ def get_z_reco_selection( events, selection, ptcut_e, ptcut_m, ptcut_e2=20, ptcu
     #print("Hello from function electron pt", events.Electron.pt)
     
     selection.add("twoReco_ee", 
-                  (ak.num(events.Electron) >= 2) & 
+                  (ak.num(events.Electron) == 2) & 
                   (ak.all(events.Electron.pt > ptcut_e2, axis=1)) & ## Subleading electron pt cut
                   (ak.max(events.Electron.pt, axis=1) > ptcut_e) &## leading electron pt cut
                   (ak.all( np.abs(events.Electron.eta) < 2.5, axis=1)) & ## leading electron eta cut
@@ -100,13 +100,13 @@ def get_z_reco_selection( events, selection, ptcut_e, ptcut_m, ptcut_e2=20, ptcu
     
     
     selection.add("twoReco_mm", 
-                  (ak.num(events.Muon) >= 2) & 
+                  (ak.num(events.Muon) == 2) & 
                   (ak.all(events.Muon.pt > ptcut_m2, axis=1)) & 
                   (ak.max(events.Muon.pt, axis=1) > ptcut_m) &
                   (ak.all( np.abs(events.Muon.eta) < 2.5, axis=1)) & 
                   (ak.sum(events.Muon[:, :2].charge, axis=1) == 0) &
                   #(ak.all(events.Muon.pfRelIso04_all < 0.25, axis=1)) &
-                  (ak.all(events.Muon.mediumId == True, axis=1))
+                  (ak.all(events.Muon.tightId == True, axis=1))
     )
     
     selection.add("number of muon is 2", (ak.num(events.Muon) >= 2))
@@ -166,38 +166,74 @@ def get_groomed_jet( jet, subjets , verbose = False):
     total = combs[sel]['1'].sum(axis=1)
     return total, sel
 
-def apply_lepton_separation(jets, muons, electrons):
-    '''
-    Input -- jet collection and muon collection.
-    Finds which jets are within DeltaR 0.4 of a muon and discards them. Returns cleaned jets.
+# def apply_lepton_separation(jets, muons, electrons):
+#     '''
+#     Input -- jet collection and muon collection.
+#     Finds which jets are within DeltaR 0.4 of a muon and discards them. Returns cleaned jets.
     
-    '''
-    combs_muons = ak.cartesian( (jets, muons), axis = 1 )
-    dr_jet_muons = combs_muons['0'].delta_phi(combs_muons['1'])
+#     '''
+#     combs_muons = ak.cartesian( (jets, muons), axis = 1 )
+#     dr_jet_muons = combs_muons['0'].delta_r(combs_muons['1'])
 
-    sel = (dr_jet_muons > 0.4)
+#     sel = (dr_jet_muons > 0.4)
 
-    jets = combs_muons[sel]['0']
-    ele_sep = False
-    if ele_sep:
-        del sel
-        combs_electrons = ak.cartesian( (jets, electrons), axis = 1 )
-        dr_jet_electrons = combs_electrons['0'].delta_phi(combs_electrons['1'])    
-        sel =  (dr_jet_electrons > 0.4)
-        good_jets = combs_electrons[sel]['0']
-        return good_jets
-    else:
-        return jets
+#     jets = combs_muons[sel]['0']
+#     ele_sep = False
+#     if ele_sep:
+#         del sel
+#         combs_electrons = ak.cartesian( (jets, electrons), axis = 1 )
+#         dr_jet_electrons = combs_electrons['0'].delta_phi(combs_electrons['1'])    
+#         sel =  (dr_jet_electrons > 0.4)
+#         good_jets = combs_electrons[sel]['0']
+#         return good_jets
+#     else:
+#         return jets
+def apply_lepton_separation(jets, muons, electrons, dr_cut=0.4):
+    """
+    Remove jets within dR < dr_cut of any selected muon or electron.
+    Returns the cleaned jet collection.
+    """
+    # jets:    shape (events, n_jets)
+    # muons:   shape (events, n_muons)
+    # For each jet, broadcast muon coordinates and find minimum dR to any muon
 
-def get_dphi( a, coll, verbose=False ):
-    '''
-    Find the highest-pt object in coll and return the highest pt,
-    as well as the delta phi to a. 
-    '''
-    combs = ak.cartesian( (a, coll), axis=1 )
-    dphi = np.abs(combs['0'].delta_phi(combs['1']))
+    # Expand dims to get (events, n_jets, 1) vs (events, 1, n_muons) broadcasting
+    jet_eta  = jets.eta[:, :, np.newaxis]
+    jet_phi  = jets.phi[:, :, np.newaxis]
+    mu_eta   = muons.eta[:, np.newaxis, :]
+    mu_phi   = muons.phi[:, np.newaxis, :]
+    el_eta   = electrons.eta[:, np.newaxis, :]
+    el_phi   = electrons.phi[:, np.newaxis, :]
+
+    deta_mu  = jet_eta - mu_eta
+    dphi_mu  = (jet_phi - mu_phi + np.pi) % (2 * np.pi) - np.pi
+    dR_mu    = np.sqrt(deta_mu**2 + dphi_mu**2)   # (events, n_jets, n_muons)
+
+    deta_el  = jet_eta - el_eta
+    dphi_el  = (jet_phi - el_phi + np.pi) % (2 * np.pi) - np.pi
+    dR_el    = np.sqrt(deta_el**2 + dphi_el**2)   # (events, n_jets, n_electrons)
+
+    # A jet is clean if it is far from ALL muons AND ALL electrons
+    clean_of_mu = ak.all(dR_mu > dr_cut, axis=2)  # (events, n_jets)
+    clean_of_el = ak.all(dR_el > dr_cut, axis=2)  # (events, n_jets)
+
+    return jets[clean_of_mu & clean_of_el]
+# def get_dphi( a, coll, verbose=False ):
+#     '''
+#     Find the highest-pt object in coll and return the highest pt,
+#     as well as the delta phi to a. 
+#     '''
+#     combs = ak.cartesian( (a, coll), axis=1 )
+#     dphi = np.abs(combs['0'].delta_phi(combs['1']))
     
-    return ak.firsts( combs['1'] ), ak.firsts(dphi)
+#     return ak.firsts( combs['1'] ), ak.firsts(dphi)
+
+def get_dphi(a, coll, verbose=False):
+    index = ak.argsort(coll.pt, ascending=False)
+    sorted_coll = coll[index]
+    lead_jet = ak.firsts(sorted_coll)
+    dphi = np.abs(a.delta_phi(lead_jet))
+    return lead_jet, dphi
     
 def get_dphi_reco( a, coll, verbose=False ):
     '''

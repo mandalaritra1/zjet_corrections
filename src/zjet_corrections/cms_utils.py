@@ -888,6 +888,10 @@ def GetEleSF(IOV, wp, eta, pt, var = ""):
     sf = ak.where(np.array(ak.flatten(~mask)), 1, sf)
     return ak.unflatten(sf, ak.num(pt))
 
+
+
+    
+
 def GetMuonSF(IOV, corrset, abseta, pt, var="sf"):
     ## For reco and trigger SF for high pT muons
     ## Reference: https://twiki.cern.ch/twiki/bin/viewauth/CMS/MuonUL2016
