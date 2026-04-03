@@ -72,7 +72,7 @@ class QJetMassProcessor(processor.ProcessorABC):
             self._do_jk = False
         elif mode == "reweight_pythia" or mode == "reweight_pythia_rho":
             self._do_reweight = True
-        elif mode == "jk_mc" or mode == "jk_data" or mode == "rho_jk":
+        elif mode == "jk_mc" or mode == "jk_data" or mode == "rho_jk" or mode == "mass_jk":
             self._do_jk = True
         elif mode == "full":
             self._do_jk = False
@@ -267,6 +267,16 @@ class QJetMassProcessor(processor.ProcessorABC):
 
                 register_hist(self.hists, 'm_u_jet_reco_over_gen', [dataset_axis, ptgen_axis, mgen_axis, frac_axis, binning.jackknife_axis, syst_axis,])
                 register_hist(self.hists, 'm_g_jet_reco_over_gen', [dataset_axis, ptgen_axis, mgen_axis, frac_axis, binning.jackknife_axis, syst_axis,])
+
+        if self._mode == "mass_jk":
+            register_hist(self.hists, "ptjet_mjet_u_reco", [dataset_axis, channel_axis, ptreco_axis, mreco_axis, binning.jackknife_axis, syst_axis])
+            register_hist(self.hists, "ptjet_mjet_g_reco", [dataset_axis, channel_axis, ptreco_axis, mreco_axis, binning.jackknife_axis, syst_axis])
+
+            if self._do_gen:
+                register_hist(self.hists, "response_matrix_u", [dataset_axis, channel_axis, ptreco_axis, mreco_axis, ptgen_axis, mgen_axis, binning.jackknife_axis, syst_axis])
+                register_hist(self.hists, "response_matrix_g", [dataset_axis, channel_axis, ptreco_axis, mreco_axis, ptgen_axis, mgen_axis, binning.jackknife_axis, syst_axis])
+                register_hist(self.hists, "ptjet_mjet_u_gen", [dataset_axis, channel_axis, ptgen_axis, mgen_axis, binning.jackknife_axis, syst_axis])
+                register_hist(self.hists, "ptjet_mjet_g_gen", [dataset_axis, channel_axis, ptgen_axis, mgen_axis, binning.jackknife_axis, syst_axis])
 
 
                 
@@ -1523,6 +1533,31 @@ class QJetMassProcessor(processor.ProcessorABC):
                                 mgen_g = groomed_gen_jet_truth.mass
                                 mgen_g = mgen_g[~ak.is_none(mgen_g)]
                                 weights_gen = weights_gen[~ak.is_none(mgen)]
+                                mass_jk_fill = {"jk": jk_index} if self._mode == "mass_jk" else {}
+
+                                fill_hist(
+                                    self.hists,
+                                    "ptjet_mjet_u_gen",
+                                    dataset=dataset,
+                                    channel=channel,
+                                    ptgen=ptgen,
+                                    mgen=mgen,
+                                    weight=weights_gen,
+                                    systematic=syst,
+                                    **mass_jk_fill,
+                                )
+                                fill_hist(
+                                    self.hists,
+                                    "ptjet_mjet_g_gen",
+                                    dataset=dataset,
+                                    channel=channel,
+                                    ptgen=ptgen,
+                                    mgen=mgen_g,
+                                    weight=weights_gen,
+                                    systematic=syst,
+                                    **mass_jk_fill,
+                                )
+
                                 mpt_gen = 2*np.log10(mgen/(ptgen*jetR))
                                 mpt_gen_g = 2*np.log10(mgen_g/(ptgen*jetR))
 
@@ -1628,9 +1663,9 @@ class QJetMassProcessor(processor.ProcessorABC):
 
                                 
                                 jetR = 0.8
-                                fill_hist(self.hists, "response_matrix_u", dataset = dataset, channel = channel, ptreco = ptreco_both, mreco = mreco_both, ptgen = ptgen_both, mgen = mgen_both, systematic = syst, weight = weights_both)
+                                fill_hist(self.hists, "response_matrix_u", dataset = dataset, channel = channel, ptreco = ptreco_both, mreco = mreco_both, ptgen = ptgen_both, mgen = mgen_both, systematic = syst, weight = weights_both, **mass_jk_fill)
 
-                                fill_hist(self.hists, "response_matrix_g", dataset = dataset, channel = channel, ptreco = ptreco_both_g, mreco = mreco_both_g, ptgen = ptgen_both, mgen = mgen_both_g,systematic = syst, weight = weights_both)
+                                fill_hist(self.hists, "response_matrix_g", dataset = dataset, channel = channel, ptreco = ptreco_both_g, mreco = mreco_both_g, ptgen = ptgen_both, mgen = mgen_both_g,systematic = syst, weight = weights_both, **mass_jk_fill)
 
                                 # fill_hist(self.hists, 'm_u_jet_reco_over_gen', dataset = dataset, ptgen = ptgen_both, mgen = mgen_both, 
                                 #           frac = (mreco_both-mgen_both) /mgen_both, weight = weights_both)
@@ -1826,8 +1861,8 @@ class QJetMassProcessor(processor.ProcessorABC):
                                 self.logging.debug(f"ptreco sample {ptreco[:10]}")
                                 self.logging.debug(f"mreco sample {mreco[:10]}")
                                 self.logging.debug(f"mreco_g sample {mreco_g[:10]}")
-                            fill_hist(self.hists, "ptjet_mjet_u_reco", dataset = dataset, channel = channel, ptreco = ptreco, mreco = mreco, systematic = syst, weight = weights_reco)
-                            fill_hist(self.hists, "ptjet_mjet_g_reco", dataset = dataset, channel = channel, ptreco = ptreco_g, mreco = mreco_g, systematic = syst, weight = weights_reco_g)
+                            fill_hist(self.hists, "ptjet_mjet_u_reco", dataset = dataset, channel = channel, ptreco = ptreco, mreco = mreco, systematic = syst, weight = weights_reco, **mass_jk_fill)
+                            fill_hist(self.hists, "ptjet_mjet_g_reco", dataset = dataset, channel = channel, ptreco = ptreco_g, mreco = mreco_g, systematic = syst, weight = weights_reco_g, **mass_jk_fill)
 
 
                                 
@@ -1954,6 +1989,7 @@ class QJetMassProcessor(processor.ProcessorABC):
                             weights_gen =  weights.partial_weight(include=['genWeight'])[sel_gen]
                             weights_both = weights.weight()[sel_both]
                         weights_reco = weights.weight()[sel_reco]
+                        mass_jk_fill = {"jk": jk_index} if self._mode == "mass_jk" else {}
                         
 
                         reco_jet_meas = reco_jet[sel_reco]
@@ -2129,8 +2165,8 @@ class QJetMassProcessor(processor.ProcessorABC):
                             fill_hist(self.hists, "dphi", dataset = dataset, dphi = dphi, systematic = jet_syst, weight = weights_reco)
 
                         else:
-                            fill_hist(self.hists, "ptjet_mjet_u_reco", dataset = dataset, channel = channel, ptreco = ptreco, mreco = mreco, systematic = jet_syst, weight = weights_reco, jk = jk_index)
-                            fill_hist(self.hists, "ptjet_mjet_g_reco", dataset = dataset, channel = channel, ptreco = ptreco_g, mreco = mreco_g, systematic = jet_syst, weight = weights_reco_g, jk = jk_index)
+                            fill_hist(self.hists, "ptjet_mjet_u_reco", dataset = dataset, channel = channel, ptreco = ptreco, mreco = mreco, systematic = jet_syst, weight = weights_reco, **mass_jk_fill)
+                            fill_hist(self.hists, "ptjet_mjet_g_reco", dataset = dataset, channel = channel, ptreco = ptreco_g, mreco = mreco_g, systematic = jet_syst, weight = weights_reco_g, **mass_jk_fill)
                             
 
                         if self._do_gen:
@@ -2152,13 +2188,13 @@ class QJetMassProcessor(processor.ProcessorABC):
                             mreco_both = mreco_both[~ak.is_none(mreco_both)]
                             weights_both = weights_both[~ak.is_none(mreco_both)]
                             
-                            fill_hist(self.hists, "response_matrix_u", dataset = dataset, channel = channel, ptreco = ptreco_both, mreco = mreco_both, ptgen = ptgen_both, mgen = mgen_both, systematic = jet_syst, weight = weights_both)
+                            fill_hist(self.hists, "response_matrix_u", dataset = dataset, channel = channel, ptreco = ptreco_both, mreco = mreco_both, ptgen = ptgen_both, mgen = mgen_both, systematic = jet_syst, weight = weights_both, **mass_jk_fill)
                             ptreco_both_g = reco_jet_both.pt
                             ptreco_both_g = ptreco_both_g[~ak.is_none(ptreco_both_g)]
                             mreco_both_g = reco_jet_both.msoftdrop
                             mreco_both_g = mreco_both_g[~ak.is_none(mreco_both_g)]
                             weights_both_g = weights_both[~ak.is_none(mreco_both_g)]
-                            fill_hist(self.hists, "response_matrix_g", dataset = dataset, channel = channel, ptreco = ptreco_both_g, mreco = mreco_both_g, ptgen = ptgen_both, mgen = mgen_both_g, systematic = jet_syst, weight = weights_both_g)
+                            fill_hist(self.hists, "response_matrix_g", dataset = dataset, channel = channel, ptreco = ptreco_both_g, mreco = mreco_both_g, ptgen = ptgen_both, mgen = mgen_both_g, systematic = jet_syst, weight = weights_both_g, **mass_jk_fill)
 
                             ### Rho filling
 

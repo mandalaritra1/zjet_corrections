@@ -1,0 +1,437 @@
+import os
+import pickle
+import shutil
+import time
+from dataclasses import dataclass
+from pathlib import Path
+
+from coffea import processor
+from coffea.nanoevents import NanoAODSchema
+
+
+HT_BINS = [
+    "100to200",
+    "200to400",
+    "400to600",
+    "600to800",
+    "800to1200",
+    "1200to2500",
+    "2500toInf",
+]
+
+DATASET_OPTIONS = [
+    "pythia",
+    "pythia_local",
+    "pythia2",
+    "herwig",
+    "st",
+    "powheg",
+    "backgrounds",
+]
+
+ERA_OPTIONS = ["2016", "2016APV", "2017", "2018", "all"]
+
+RHO_MODE_OPTIONS = ["validation", "minimal_rho", "rho_jk"]
+MASS_MODE_OPTIONS = ["mass", "mass_reweight", "mass_jk", "mass_jk_mc", "mass_jk_data"]
+MODE_OPTIONS = RHO_MODE_OPTIONS + MASS_MODE_OPTIONS
+SYSTEMATIC_PROFILE_OPTIONS = ["all_syst", "minimal_syst", "no_syst"]
+
+_MASS_MODE_ALIASES = {
+    "minimal",
+    "reweight_pythia",
+    "jk_mc",
+    "jk_data",
+    *MASS_MODE_OPTIONS,
+}
+
+ST_FILES = [
+    "st_tW_antitop_UL16NanoAODv9.txt",
+    "st_tW_antitop_UL16NanoAODAPVv9.txt",
+    "st_tW_antitop_UL17NanoAODv9.txt",
+    "st_tW_antitop_UL18NanoAODv9.txt",
+    "st_tW_top_UL16NanoAODv9.txt",
+    "st_tW_top_UL16NanoAODAPVv9.txt",
+    "st_tW_top_UL17NanoAODv9.txt",
+    "st_tW_top_UL18NanoAODv9.txt",
+    "ST_t-channel_antitop_4f_InclusiveDecays_UL16NanoAODv9.txt",
+    "ST_t-channel_antitop_4f_InclusiveDecays_UL16NanoAODAPVv9.txt",
+    "ST_t-channel_antitop_4f_InclusiveDecays_UL17NanoAODv9.txt",
+    "ST_t-channel_antitop_4f_InclusiveDecays_UL18NanoAODv9.txt",
+    "ST_t-channel_top_4f_InclusiveDecays_UL16NanoAODv9.txt",
+    "ST_t-channel_top_4f_InclusiveDecays_UL16NanoAODAPVv9.txt",
+    "ST_t-channel_top_4f_InclusiveDecays_UL17NanoAODv9.txt",
+    "ST_t-channel_top_4f_InclusiveDecays_UL18NanoAODv9.txt",
+]
+
+MINIMAL_JET_SYSTEMATICS = ["nominal", "JERUp", "JERDown"]
+NO_SYST_SYSTEMATICS = ["nominal"]
+
+
+@dataclass(frozen=True)
+class AnalysisPaths:
+    repo_root: Path
+    samples_data_dir: Path
+    samples_mc_dir: Path
+    samples_bkg_dir: Path
+    samples_mc_local_dir: Path
+
+
+class SamplePath:
+    """Hold list-of-lists so the notebook can run per-group or all-in-one."""
+
+    def __init__(self, era: str):
+        self.era = era
+
+        if era == "all":
+            self.data = [
+                ["SingleMuon_UL2018.txt", "EGamma_UL2018.txt"],
+                ["SingleMuon_UL2017.txt", "SingleElectron_UL2017.txt"],
+                ["SingleMuon_UL2016APV.txt", "SingleElectron_UL2016APV.txt"],
+                ["SingleMuon_UL2016.txt", "SingleElectron_UL2016.txt"],
+            ]
+            self.pythia = [
+                ["pythia_UL16NanoAODAPVv9.txt"],
+                ["pythia_UL16NanoAODv9.txt"],
+                ["pythia_UL17NanoAODv9.txt"],
+                ["pythia_UL18NanoAODv9.txt"],
+            ]
+            self.herwig = [
+                ["herwig7_UL16NanoAODAPVv9_inclusive.txt"],
+                ["herwig7_UL16NanoAODv9_inclusive.txt"],
+                ["herwig7_UL17NanoAODv9_inclusive.txt"],
+                ["herwig7_UL18NanoAODv9_inclusive.txt"],
+            ]
+        elif era == "2018":
+            self.data = [["SingleMuon_UL2018.txt", "EGamma_UL2018.txt"]]
+            self.pythia = [["pythia_UL18NanoAODv9.txt"]]
+            self.herwig = [["herwig7_UL18NanoAODv9_inclusive.txt"]]
+        elif era == "2017":
+            self.data = [["SingleMuon_UL2017.txt", "SingleElectron_UL2017.txt"]]
+            self.pythia = [["pythia_UL17NanoAODv9.txt"]]
+            self.herwig = [["herwig7_UL17NanoAODv9_inclusive.txt"]]
+        elif era == "2016APV":
+            self.data = [["SingleMuon_UL2016APV.txt", "SingleElectron_UL2016APV.txt"]]
+            self.pythia = [["pythia_UL16NanoAODAPVv9.txt"]]
+            self.herwig = [["herwig7_UL16NanoAODAPVv9_inclusive.txt"]]
+        elif era == "2016":
+            self.data = [["SingleMuon_UL2016.txt", "SingleElectron_UL2016.txt"]]
+            self.pythia = [["pythia_UL16NanoAODv9.txt"]]
+            self.herwig = [["herwig7_UL16NanoAODv9_inclusive.txt"]]
+        else:
+            raise ValueError(f"Unknown era: {era}")
+
+
+def resolve_repo_root(start: Path | None = None) -> Path:
+    repo_root = (start or Path.cwd()).resolve()
+    if not (repo_root / "src" / "zjet_corrections").exists():
+        repo_root = repo_root.parent
+    return repo_root
+
+
+def get_analysis_paths(repo_root: Path | None = None) -> AnalysisPaths:
+    root = resolve_repo_root(repo_root)
+    return AnalysisPaths(
+        repo_root=root,
+        samples_data_dir=root / "tests" / "samples",
+        samples_mc_dir=root / "tests" / "samples_mc",
+        samples_bkg_dir=root / "tests" / "samples_mc" / "backgrounds",
+        samples_mc_local_dir=root / "tests" / "samples_mc" / "files",
+    )
+
+
+def format_time(seconds: float) -> str:
+    hours, remainder = divmod(int(seconds), 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes}m {seconds}s"
+    if minutes:
+        return f"{minutes}m {seconds}s"
+    return f"{seconds}s"
+
+
+def iter_groups(list_of_lists, mode: str):
+    """Yield groups based on the notebook's intended semantics."""
+    if mode == "per_group":
+        for group in list_of_lists:
+            yield group
+    elif mode == "all_in_one":
+        flat = []
+        for group in list_of_lists:
+            flat.extend(group)
+        yield flat
+    else:
+        raise ValueError(f"Unknown group_mode: {mode}")
+
+
+def read_txt_lines(txt_file: str | os.PathLike[str]) -> list[str]:
+    with open(txt_file) as handle:
+        return [line.strip() for line in handle.readlines() if line.strip()]
+
+
+def build_fileset_from_txts(
+    txt_files: list[str],
+    base_dir: str | os.PathLike[str],
+    prepend: str,
+    split_ht: bool = False,
+    ht_bins: list[str] | None = None,
+) -> dict[str, list[str]]:
+    fileset = {}
+
+    for filename in txt_files:
+        sample = filename.split(".")[0]
+        fullpath = os.path.join(base_dir, filename)
+        lines = read_txt_lines(fullpath)
+
+        if split_ht:
+            if not ht_bins:
+                raise ValueError("split_ht=True requires ht_bins")
+            for ht_bin in ht_bins:
+                files = [prepend + line for line in lines if ht_bin in line]
+                fileset[f"{sample}_HT-{ht_bin}"] = files
+        else:
+            fileset[sample] = [prepend + line for line in lines]
+
+    return {key: value for key, value in fileset.items() if value}
+
+
+def build_backgrounds_fileset(
+    directory: str | os.PathLike[str],
+    prepend: str,
+) -> dict[str, list[str]]:
+    fileset = {}
+    for filename in os.listdir(directory):
+        if not filename.endswith(".txt"):
+            continue
+        core = filename[:-4]
+        index = core.find("UL")
+        if index == -1:
+            print(f"Warning: 'UL' not found in {core}, skipping")
+            continue
+        sample = core[:index]
+        era_version = core[index:]
+        key = f"{sample}_{era_version}"
+        lines = read_txt_lines(os.path.join(directory, filename))
+        fileset[key] = [prepend + line for line in lines]
+    return fileset
+
+
+def build_local_pythia_fileset(
+    directory: str | os.PathLike[str],
+    era: str,
+) -> dict[str, list[str]]:
+    era_map = {
+        "2016": "UL16NanoAODv9",
+        "2016APV": "UL16NanoAODAPVv9",
+        "2017": "UL17NanoAODv9",
+        "2018": "UL18NanoAODv9",
+    }
+    if era == "all":
+        raise ValueError("pythia_local requires a specific era, not era='all'.")
+    if era not in era_map:
+        raise ValueError(f"Unsupported era for pythia_local: {era}")
+
+    fileset = {}
+    for path in sorted(Path(directory).rglob("*.root")):
+        stem = path.stem
+        ht_source = stem if "HT" in stem else str(path)
+        if "HT" not in ht_source:
+            print(f"Warning: could not infer HT bin from local file {path.name}, skipping")
+            continue
+
+        ht_token = ht_source.split("HT", 1)[1].split("_")[0].lstrip("_-")
+        dataset_name = f"pythia_{era_map[era]}_HT-{ht_token}"
+        fileset[dataset_name] = [str(path)]
+
+    if not fileset:
+        raise FileNotFoundError(f"No local ROOT files found in {directory}")
+    return fileset
+
+
+def get_processor_class(mode: str):
+    if mode in _MASS_MODE_ALIASES:
+        from .zjet_processor_mass import QJetMassProcessor
+
+        return QJetMassProcessor
+
+    from .zjet_processor import QJetMassProcessor
+
+    return QJetMassProcessor
+
+
+def resolve_systematics(profile: str):
+    if profile == "all_syst":
+        return None, None
+    if profile == "minimal_syst":
+        return NO_SYST_SYSTEMATICS.copy(), MINIMAL_JET_SYSTEMATICS.copy()
+    if profile == "no_syst":
+        return NO_SYST_SYSTEMATICS.copy(), NO_SYST_SYSTEMATICS.copy()
+    raise ValueError(f"Unknown systematic profile: {profile}")
+
+
+def make_runner(
+    use_dask: bool = False,
+    client=None,
+    workers: int = 1,
+    chunksize: int = 200_000,
+    maxchunks: int | None = 1,
+    skipbadfiles: bool = True,
+):
+    if use_dask:
+        if client is None:
+            raise ValueError("use_dask=True but no Dask client provided.")
+        executor = processor.DaskExecutor(
+            client=client,
+            status=True,
+            retries=10,
+            treereduction=10,
+        )
+    else:
+        executor = processor.FuturesExecutor(
+            workers=workers,
+            status=True,
+            compression=None,
+        )
+
+    return processor.Runner(
+        executor=executor,
+        schema=NanoAODSchema,
+        chunksize=chunksize,
+        maxchunks=maxchunks,
+        skipbadfiles=skipbadfiles,
+        xrootdtimeout=120,
+    )
+
+
+def ensure_client(casa: bool, test: bool, useDefault: bool):
+    if test:
+        print("Running locally with 1-2 files (test=True)")
+        return None
+
+    from dask.distributed import Client
+
+    if casa:
+        if useDefault:
+            client = Client("tls://localhost:8786")
+            print("Connected to existing Dask client.")
+            return client
+
+        from coffea_casa import CoffeaCasaCluster
+
+        cluster = CoffeaCasaCluster(memory="6 GiB", cores=1)
+        cluster.adapt(minimum=0, maximum=300)
+        client = Client(cluster)
+        print("Created CoffeaCasaCluster client.")
+        return client
+
+    print("casa=False: running without distributed client.")
+    return None
+
+
+def upload_package_if_casa(client, casa: bool, package_dir: Path | None = None):
+    if not casa or client is None:
+        return
+
+    pkg_dir = package_dir or Path(__file__).resolve().parent
+    zip_path = Path("/tmp/zjet_corrections.zip")
+    if zip_path.exists():
+        zip_path.unlink()
+
+    shutil.make_archive(zip_path.with_suffix(""), "zip", pkg_dir.parent, pkg_dir.name)
+    client.upload_file(str(zip_path))
+    print("Uploaded zjet_corrections.zip to workers.")
+
+
+def run_once(
+    fileset: dict[str, list[str]],
+    *,
+    client,
+    test: bool,
+    data: bool,
+    mode: str,
+    systematic_profile: str = "all_syst",
+    chunksize: int = 100_000,
+    chunksize_test: int = 100_000,
+):
+    print("Running over:", list(fileset.keys())[:10], "..." if len(fileset) > 10 else "")
+    systematics, jet_systematics = resolve_systematics(systematic_profile)
+
+    if test:
+        first_key = list(fileset.keys())[0]
+        fileset = {first_key: [fileset[first_key][0]]}
+        print("Running over test files:", list(fileset.keys()))
+        run = make_runner(
+            use_dask=False,
+            client=client,
+            chunksize=chunksize_test,
+            maxchunks=1,
+        )
+        debug = True
+    else:
+        print("Running over full dataset")
+        run = make_runner(
+            use_dask=True,
+            client=client,
+            chunksize=chunksize,
+            maxchunks=None,
+        )
+        debug = False
+
+    processor_cls = get_processor_class(mode)
+
+    start = time.time()
+    out = run(
+        fileset,
+        "Events",
+        processor_instance=processor_cls(
+            do_gen=not data,
+            debug=debug,
+            systematics=systematics,
+            jet_systematics=jet_systematics,
+            mode=mode,
+        ),
+    )
+    print(f"Done. time taken {format_time(time.time() - start)}")
+    return out
+
+
+def save_output(out, fout: str | os.PathLike[str]):
+    output_path = Path(fout)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "wb") as handle:
+        pickle.dump(out, handle)
+    size = output_path.stat().st_size
+    unit = "kB" if size < 1e6 else "MB"
+    value = size / (1e3 if unit == "kB" else 1e6)
+    print(f"Output written to {output_path} with size {value:.1f} {unit}")
+
+
+def default_output_dir(repo_root: Path | None = None) -> Path:
+    return get_analysis_paths(repo_root).repo_root / "tests" / "outputs"
+
+
+def make_output_filename(
+    data: bool,
+    dataset: str,
+    tag: str,
+    mode: str | None = None,
+    test: bool = False,
+    output_dir: str | os.PathLike[str] | None = None,
+) -> str:
+    base = "data" if data else dataset
+    mode_token = ""
+    if mode:
+        safe_mode = "".join(ch if ch.isalnum() else "_" for ch in mode).strip("_")
+        if safe_mode:
+            mode_token = f"{safe_mode}_"
+    filename = f"{mode_token}{base}_{tag}{'_TEST' if test else ''}.pkl"
+    base_output_dir = Path(output_dir) if output_dir is not None else default_output_dir()
+    return str(base_output_dir / filename)
+
+
+def get_group_tag(index: int, era: str, group_mode: str) -> str:
+    if group_mode == "per_group":
+        if era == "all":
+            era_tags = ["2016", "2016APV", "2017", "2018"]
+            return era_tags[index] if index < len(era_tags) else f"group{index}"
+        return era
+    return era if era != "all" else "all"
