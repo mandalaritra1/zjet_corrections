@@ -72,3 +72,7 @@ Thumbs.db
 *.pkl
 *.root
 test_output/
+tests/.analysis_widget_config.json
+.codex
+.python-version
+.analysis_widget_config.json
