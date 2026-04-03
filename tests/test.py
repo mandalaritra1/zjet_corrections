@@ -438,14 +438,14 @@ def main():
         t0 = time.time()
         out = run(
             fileset_to_run,
-            "Events",
-            processor_instance=QJetMassProcessor(
+            QJetMassProcessor(
                 do_gen=not args.data,
                 debug=args.debug,
                 systematics=systematics,
                 jet_systematics=jet_systematics,
                 mode=args.mode,
             ),
+            treename="Events",
         )
         t1 = time.time()
         print(f"Done Running, time taken {format_time(t1 - t0)}")

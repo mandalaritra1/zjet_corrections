@@ -267,11 +267,14 @@ def GetPDFweights(df):
 def GetL1PreFiringWeight(IOV, df):
     """Return (nominal, up, down) L1 prefiring weights from the event record."""
     if "L1PreFiringWeight" not in ak.fields(df):
-        ones = ak.ones_like(df.event)
+        ones = np.ones(len(df), dtype=np.float64)
         return ones, ones, ones
 
     weights = df["L1PreFiringWeight"]
-    return weights["Nom"], weights["Up"], weights["Dn"]
+    nom = ak.to_numpy(ak.fill_none(weights["Nom"], 1.0))
+    up = ak.to_numpy(ak.fill_none(weights["Up"], 1.0))
+    down = ak.to_numpy(ak.fill_none(weights["Dn"], 1.0))
+    return nom, up, down
 
 
 def GetPSweights(df, shower = "ISR"):
@@ -731,7 +734,7 @@ def GetJetCorrections(FatJets, events, era, IOV, isData=False, uncertainties = N
     
     FatJets['pt_raw'] = (1 - FatJets['rawFactor']) * FatJets['pt']
     FatJets['mass_raw'] = (1 - FatJets['rawFactor']) * FatJets['mass']
-    FatJets['rho'] = ak.broadcast_arrays(events.fixedGridRhoFastjetAll, FatJets.pt)[0]
+    FatJets['jec_rho'] = ak.broadcast_arrays(events.fixedGridRhoFastjetAll, FatJets.pt)[0]
     #print("Rho value for jets ", events.fixedGridRhoFastjetAll)
 
     
@@ -749,14 +752,12 @@ def GetJetCorrections(FatJets, events, era, IOV, isData=False, uncertainties = N
     name_map['massRaw'] = 'mass_raw'
     name_map['JetA'] = 'area'
     name_map['ptGenJet'] = 'pt_gen'
-    name_map['Rho'] = 'rho'
-
-    events_cache = events.caches[0]
+    name_map['Rho'] = 'jec_rho'
 
     jet_factory = CorrectedJetsFactory(name_map, jec_stack)
 
 
-    corrected_jets = jet_factory.build(FatJets, lazy_cache=events_cache)
+    corrected_jets = jet_factory.build(FatJets)
     # print("Available uncertainties: ", jet_factory.uncertainties())
     # print("Corrected jets object: ", corrected_jets.fields)
     #print("pt and mass before correction ", FatJets['pt_raw'], ", ", FatJets['mass_raw'], " and after correction ", corrected_jets["pt"], ", ", corrected_jets["mass"])

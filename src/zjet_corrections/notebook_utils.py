@@ -2,6 +2,7 @@ import os
 import pickle
 import shutil
 import time
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,6 +36,7 @@ RHO_MODE_OPTIONS = ["validation", "minimal_rho", "rho_jk"]
 MASS_MODE_OPTIONS = ["mass", "mass_reweight", "mass_jk", "mass_jk_mc", "mass_jk_data"]
 MODE_OPTIONS = RHO_MODE_OPTIONS + MASS_MODE_OPTIONS
 SYSTEMATIC_PROFILE_OPTIONS = ["all_syst", "minimal_syst", "no_syst"]
+EXECUTOR_MODE_OPTIONS = ["futures", "dask-local", "dask-casa"]
 
 _MASS_MODE_ALIASES = {
     "minimal",
@@ -302,14 +304,50 @@ def make_runner(
     )
 
 
-def ensure_client(casa: bool, test: bool, useDefault: bool):
+def _resolve_executor_mode(
+    *,
+    executor_mode: str | None,
+    casa: bool,
+) -> str:
+    if executor_mode is not None:
+        if executor_mode not in EXECUTOR_MODE_OPTIONS:
+            raise ValueError(
+                f"Unknown executor_mode '{executor_mode}'. "
+                f"Choose from {', '.join(EXECUTOR_MODE_OPTIONS)}."
+            )
+        return executor_mode
+    return "dask-casa" if casa else "futures"
+
+
+def ensure_client(
+    casa: bool,
+    test: bool,
+    useDefault: bool,
+    executor_mode: str | None = None,
+):
+    from dask.distributed import Client
+    from dask.distributed import LocalCluster
+    resolved_mode = _resolve_executor_mode(executor_mode=executor_mode, casa=casa)
+
     if test:
         print("Running locally with 1-2 files (test=True)")
+
+    if resolved_mode == "futures":
+        print("Using FuturesExecutor without a Dask client.")
         return None
 
-    from dask.distributed import Client
+    if resolved_mode == "dask-local":
+        cluster = LocalCluster(
+            n_workers=1 if test else 4,
+            threads_per_worker=1,
+            processes=True,
+            silence_logs=logging.ERROR,
+        )
+        client = Client(cluster)
+        print("Created local Dask client.")
+        return client
 
-    if casa:
+    if resolved_mode == "dask-casa":
         if useDefault:
             client = Client("tls://localhost:8786")
             print("Connected to existing Dask client.")
@@ -323,8 +361,7 @@ def ensure_client(casa: bool, test: bool, useDefault: bool):
         print("Created CoffeaCasaCluster client.")
         return client
 
-    print("casa=False: running without distributed client.")
-    return None
+    raise ValueError(f"Unsupported executor_mode '{resolved_mode}'")
 
 
 def upload_package_if_casa(client, casa: bool, package_dir: Path | None = None):
@@ -351,16 +388,22 @@ def run_once(
     systematic_profile: str = "all_syst",
     chunksize: int = 100_000,
     chunksize_test: int = 100_000,
+    executor_mode: str | None = None,
 ):
     print("Running over:", list(fileset.keys())[:10], "..." if len(fileset) > 10 else "")
     systematics, jet_systematics = resolve_systematics(systematic_profile)
+    if executor_mode is None:
+        use_dask = client is not None
+    else:
+        resolved_mode = _resolve_executor_mode(executor_mode=executor_mode, casa=False)
+        use_dask = resolved_mode != "futures"
 
     if test:
         first_key = list(fileset.keys())[0]
         fileset = {first_key: [fileset[first_key][0]]}
         print("Running over test files:", list(fileset.keys()))
         run = make_runner(
-            use_dask=False,
+            use_dask=use_dask,
             client=client,
             chunksize=chunksize_test,
             maxchunks=1,
@@ -369,7 +412,7 @@ def run_once(
     else:
         print("Running over full dataset")
         run = make_runner(
-            use_dask=True,
+            use_dask=use_dask,
             client=client,
             chunksize=chunksize,
             maxchunks=None,
@@ -381,14 +424,14 @@ def run_once(
     start = time.time()
     out = run(
         fileset,
-        "Events",
-        processor_instance=processor_cls(
+        processor_cls(
             do_gen=not data,
             debug=debug,
             systematics=systematics,
             jet_systematics=jet_systematics,
             mode=mode,
         ),
+        treename="Events",
     )
     print(f"Done. time taken {format_time(time.time() - start)}")
     return out

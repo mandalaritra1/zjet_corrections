@@ -1,7 +1,6 @@
 import awkward as ak
 import numpy as np
 import time
-import coffea
 import uproot
 import hist
 import vector
@@ -10,8 +9,8 @@ import os
 import pandas as pd
 import time
 from coffea import util, processor
+from coffea.analysis_tools import PackedSelection, Weights
 from coffea.nanoevents import NanoEventsFactory, NanoAODSchema, BaseSchema
-#from coffea.analysis_tools import PackedSelection
 from collections import defaultdict
 import gc
 import tokenize as tok
@@ -23,8 +22,6 @@ from coffea.lookup_tools.dense_lookup import dense_lookup
 from coffea.jetmet_tools import JetResolutionScaleFactor
 from coffea.jetmet_tools import FactorizedJetCorrector, JetCorrectionUncertainty
 from coffea.jetmet_tools import JECStack, CorrectedJetsFactory
-from .weight_class import Weights, PackedSelection
-
 from .hist_utils import *
 from .smp_utils import *
 
