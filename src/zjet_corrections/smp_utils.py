@@ -41,7 +41,7 @@ def get_z_gen_selection( events, selection, ptcut_e, ptcut_m, ptcut_e2=None, ptc
                   (ak.sum(isGenElectron, axis=1) == 2) & 
                   (ak.all(events.GenDressedLepton.pt > ptcut_e2, axis=1)) & 
                   (ak.max(events.GenDressedLepton.pt, axis=1) > ptcut_e) &
-                  (ak.all( np.abs(events.GenDressedLepton.eta) < 2.5, axis=1)) & 
+                  (ak.all( np.abs(events.GenDressedLepton.eta) < 2.4, axis=1)) & 
                   (ak.sum(events.GenDressedLepton[:, :2].pdgId , axis = 1) == 0)
                   #(ak.sum(gen_charge, axis=1) == 0)
                  )
@@ -49,7 +49,7 @@ def get_z_gen_selection( events, selection, ptcut_e, ptcut_m, ptcut_e2=None, ptc
                   (ak.sum(isGenMuon, axis=1) == 2) & 
                   (ak.all(events.GenDressedLepton.pt > ptcut_m2, axis=1)) & 
                   (ak.max(events.GenDressedLepton.pt, axis=1) > ptcut_m) &
-                  (ak.all( np.abs(events.GenDressedLepton.eta) < 2.5, axis=1)) & 
+                  (ak.all( np.abs(events.GenDressedLepton.eta) < 2.4, axis=1)) & 
                   (ak.sum(events.GenDressedLepton[:, :2].pdgId , axis = 1) == 0)
                   #(ak.sum(gen_charge, axis=1) == 0)
                  )
@@ -218,6 +218,25 @@ def apply_lepton_separation(jets, muons, electrons, dr_cut=0.4):
     clean_of_el = ak.all(dR_el > dr_cut, axis=2)  # (events, n_jets)
 
     return jets[clean_of_mu & clean_of_el]
+
+def apply_lepton_separation_gen(jets, leptons, dr_cut=0.4):
+    """
+    Remove jets within dR < dr_cut of any lepton in `leptons`.
+    jets:    (events, n_jets)
+    leptons: (events, n_leptons)
+    """
+    jet_eta = jets.eta[:, :, np.newaxis]
+    jet_phi = jets.phi[:, :, np.newaxis]
+
+    lep_eta = leptons.eta[:, np.newaxis, :]
+    lep_phi = leptons.phi[:, np.newaxis, :]
+
+    deta = jet_eta - lep_eta
+    dphi = (jet_phi - lep_phi + np.pi) % (2 * np.pi) - np.pi
+    dR = np.sqrt(deta**2 + dphi**2)
+
+    clean_of_lep = ak.all(dR > dr_cut, axis=2)
+    return jets[clean_of_lep]
 # def get_dphi( a, coll, verbose=False ):
 #     '''
 #     Find the highest-pt object in coll and return the highest pt,
@@ -235,18 +254,31 @@ def get_dphi(a, coll, verbose=False):
     dphi = np.abs(a.delta_phi(lead_jet))
     return lead_jet, dphi
     
-def get_dphi_reco( a, coll, verbose=False ):
-    '''
-    Find the highest-pt object in coll and return the highest pt,
-    as well as the delta phi to a. 
-    '''
-    combs = ak.cartesian( (a, coll), axis=1 )
+
+def get_dphi_reco(a, coll, verbose=False):
+    # Sort coll by pt descending so ak.firsts gives the highest-pt object
+    coll_sorted = coll[ak.argsort(coll.pt, axis=1, ascending=False)]
+    combs = ak.cartesian((a, coll_sorted), axis=1)
     dphi = np.abs(combs['0'].delta_phi(combs['1']))
     sel = dphi > 0.4
+
+    best_obj = ak.firsts(combs[sel]['1'])
+    best_dphi = ak.firsts(dphi[sel])
+
+    if verbose:
+        print(f"Best pt: {best_obj.pt}, Best dphi: {best_dphi}")
+
+    return best_obj, best_dphi  # or return best_obj.pt, best_dphi
+# def get_dphi_reco( a, coll, verbose=False ):
+#     '''
+#     Find the highest-pt object in coll and return the highest pt,
+#     as well as the delta phi to a. 
+#     '''
+#     combs = ak.cartesian( (a, coll), axis=1 )
+#     dphi = np.abs(combs['0'].delta_phi(combs['1']))
+#     sel = dphi > 0.4
     
-    return ak.firsts( combs[sel]['1'] ), ak.firsts(dphi[sel])
-
-
+#     return ak.firsts( combs[sel]['1'] ), ak.firsts(dphi[sel])
 
 def plot_pt_threshold(events0):
     import matplotlib.pyplot as plt

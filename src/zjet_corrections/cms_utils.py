@@ -836,7 +836,7 @@ def HEMCleaning(IOV, JetCollection):
 
         isHEM            = ak.where(detector_region1 & jet_selection, 0.80, isHEM)
         isHEM            = ak.where(detector_region2 & jet_selection, 0.65, isHEM)
-    JetCollection = ak.with_field(JetCollection, JetCollection.pt*isHEM, "pt" )
+    #JetCollection = ak.with_field(JetCollection, JetCollection.pt*isHEM, "pt" )
     return JetCollection
 
 
@@ -845,7 +845,6 @@ def HEMVeto(FatJets, runs):
     ## Reference: https://hypernews.cern.ch/HyperNews/CMS/get/JetMET/2000.html
     
     runid = (runs >= 319077)
-    print(runid)
     # print("Fat jet phi ", FatJets.phi)
     # print("Fat jet phi length ", len(FatJets.phi))
     # print("Fat jet eta ", FatJets.eta)

@@ -278,10 +278,16 @@ def GetPSweights(df, shower = "ISR"):
     """ Return nominal, up, down weights for ISR or FSR """
     if shower == "ISR":
         ones = ak.ones_like(df.event)
-        return ones, df.PSWeight[:,0], df.PSWeight[:,2]
+        try:
+            return ones, df.PSWeight[:,0], df.PSWeight[:,2]
+        except:
+            return ones, ones, ones
     elif shower == "FSR":
         ones = ak.ones_like(df.event)
-        return ones, df.PSWeight[:,1], df.PSWeight[:,3]
+        try:
+            return ones, df.PSWeight[:,1], df.PSWeight[:,3]
+        except:
+            return ones, ones, ones
 
 def GetQ2weights(df, var="nominal"):
     q2 = ak.ones_like(df.event, dtype = float)
@@ -812,7 +818,7 @@ def add_lepton_weights(events_j, twoReco_ee_sel, twoReco_mm_sel, weights, IOV):
     mutrig_down= ak.where(twoReco_mm_sel, mutrig_down[:,0]* mutrig_down[:,1],1.0)
     weights.add(name="mutrig", weight=mutrig_nom, weightUp=mutrig_up, weightDown=mutrig_down)
 
-def HEMVeto(FatJets, runs):
+def HEMVeto(FatJets, runs, iov):
     ## from https://github.com/laurenhay/GluonJetMass/blob/main/python/corrections.py
     ## Reference: https://hypernews.cern.ch/HyperNews/CMS/get/JetMET/2000.html
     
@@ -833,3 +839,46 @@ def HEMVeto(FatJets, runs):
     vetoHEM = ~(vetoHEMFatJets)
     
     return vetoHEM
+
+def HEMVeto(FatJets, runs, isMC=False, year="2018"):
+    """
+    HEM veto for data and MC (flat weight approach for MC).
+    For data: returns boolean mask (True = event passes veto).
+    For MC:   returns per-event weight (1.0 or flat lumi-fraction weight).
+    """
+
+    # Luminosity fractions for 2018 (adjust to your golden JSON)
+    L_total    = 59.74  # fb-1, total 2018
+    L_preHEM   = 21.07  # fb-1, before run 319077 (2018A+B+early C)
+    L_postHEM  = 38.67  # fb-1, run >= 319077 (late 2018C + 2018D)
+    f_affected = L_postHEM / L_total  # ~0.647
+
+    # Define dead detector regions
+    detector_region1 = ((FatJets.phi < -0.87) & (FatJets.phi > -1.57) &
+                        (FatJets.eta < -1.3)  & (FatJets.eta > -2.5))
+    detector_region2 = ((FatJets.phi < -0.87) & (FatJets.phi > -1.57) &
+                        (FatJets.eta < -2.5)  & (FatJets.eta > -3.0))
+    jet_selection    = ((FatJets.jetId > 1) & (FatJets.pt > 15))
+
+    in_HEM_region = (detector_region1 | detector_region2) & jet_selection
+    event_has_HEM_jet = ak.any(in_HEM_region, axis=1)  # True = bad jet present
+
+    if not isMC:
+        # ---- DATA: hard veto, only for affected runs ----
+        runid = (runs >= 319077)
+        vetoHEMFatJets = ak.any(in_HEM_region & runid, axis=1)
+        return ~vetoHEMFatJets  # True = event passes
+
+    else:
+        # ---- MC (2018 only): flat luminosity-fraction weight ----
+        # Events with a HEM jet: they would be vetoed in the affected lumi fraction
+        #   → weight = (1 - f_affected) = L_preHEM / L_total
+        # Events without a HEM jet: always pass
+        #   → weight = 1.0
+ 
+        hem_weight = ak.where(
+            event_has_HEM_jet,
+            (1.0 - f_affected),   # ~0.353 — only the "safe" lumi counts
+            1.0                   # no HEM jet → unaffected
+        )
+        return hem_weight

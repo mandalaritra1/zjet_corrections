@@ -17,6 +17,8 @@ import gc
 import tokenize as tok
 import re
 import copy
+import os
+
 
 
 from coffea.lookup_tools.dense_lookup import dense_lookup
@@ -136,6 +138,7 @@ class QJetMassProcessor(processor.ProcessorABC):
         mreco_over_pt_axis = binning.mreco_over_pt_axis
         mgen_over_pt_axis = binning.mgen_over_pt_axis
         y_axis = binning.y_axis
+        ptlong_axis = binning.ptlong_axis
         
         ptgen_axis_fine  = binning.ptgen_axis_fine 
 
@@ -215,17 +218,28 @@ class QJetMassProcessor(processor.ProcessorABC):
             register_hist(self.hists, "eta_Z", [dataset_axis, eta_axis, syst_axis])
             register_hist(self.hists, "phi_Z", [dataset_axis, phi_axis, syst_axis])
             register_hist(self.hists, "mass_Z", [dataset_axis, zmass_axis, syst_axis])
+            register_hist(self.hists, "y_Z", [dataset_axis, y_axis, syst_axis])
+            
             
             register_hist(self.hists, "pt_jet0", [dataset_axis, pt_axis, syst_axis])
-            register_hist(self.hists, "y_jet0", [dataset_axis, y_axis, syst_axis])
+            register_hist(self.hists, "pt_flavor_jet0_gen", [dataset_axis, pt_axis, n_axis])
+            register_hist(self.hists, "eta_jet0", [dataset_axis, eta_axis, syst_axis])
             register_hist(self.hists, "phi_jet0", [dataset_axis, phi_axis, syst_axis])
             register_hist(self.hists, "mass_jet0", [dataset_axis, mass_axis, syst_axis])
             register_hist(self.hists, "y_jet0", [dataset_axis, y_axis, syst_axis])
-            
+            register_hist(self.hists, "eta_phi_jet_reco", [dataset_axis, eta_axis, phi_axis])
+
+            register_hist(self.hists, "ptasym_presel", [dataset_axis, frac_axis])
             register_hist(self.hists, "ptasym", [dataset_axis, frac_axis, syst_axis])
             register_hist(self.hists, "dr", [dataset_axis, dr_axis, syst_axis])
             register_hist(self.hists, "dphi", [dataset_axis, dphi_axis, syst_axis])
-            register_hist(self.hists, "ht", [dataset_axis, pt_axis, ht_axis ])
+
+            register_hist(self.hists, "ptjet_rhojet_u_reco", [dataset_axis, ptreco_axis, mreco_over_pt_axis, syst_axis ])
+            register_hist(self.hists, "ptjet_rhojet_g_reco", [dataset_axis, ptreco_axis, mreco_over_pt_axis, syst_axis ])
+            
+            #register_hist(self.hists, "ht", [dataset_axis, ptlong_axis, ht_axis ])
+            #register_hist(self.hists, "eta_phi_jet_reco", [dataset_axis, eta_axis, phi_axis])
+            
             # register_hist(self.hists, "ht_AK4", [dataset_axis, pt_axis, ht_axis ])
             # register_hist(self.hists, "ht_reco", [dataset_axis, pt_axis, ht_axis ])
             # register_hist(self.hists, "ht_reco_AK4", [dataset_axis, pt_axis, ht_axis ])
@@ -323,7 +337,10 @@ class QJetMassProcessor(processor.ProcessorABC):
                 year = fname_toks[ fname_toks.index("mc") + 1]
                 ht_bin = fname_toks[ fname_toks.index("mc") + 2]
                 ht_bin_tokens = ht_bin.split("_")
-                ht_bin = ht_bin_tokens[ht_bin_tokens.index("DYJetsToLL")+2]
+                try:
+                    ht_bin = ht_bin_tokens[ht_bin_tokens.index("DYJetsToLL")+2]
+                except:
+                    ht_bin = 'inclusive'
                 
 
                 ## Flag used for number of events
@@ -398,14 +415,16 @@ class QJetMassProcessor(processor.ProcessorABC):
                 
                 
                 weights.add("genWeight", events0.genWeight)
-                ht_value = ak.sum(events0.GenJetAK8[events0.GenJetAK8.pt > 10].pt, axis = 1)
-                print("ht bin", ht_bin)
-                fill_hist(self.hists, 'ht', dataset = dataset, pt = ht_value, ht_bin = ht_bin, weight = weights.weight())
+                if "LHE" in events0.fields:
+                    ht_value = events0.LHE.HT
+                    print("ht bin", ht_bin)
+                    fill_hist(self.hists, 'ht', dataset = dataset, pt = ht_value, ht_bin = ht_bin, weight = weights.weight())
 
-                ht_value_ak4 = ak.sum(events0.GenJet[events0.GenJet.pt > 10].pt, axis = 1)
-                fill_hist(self.hists, 'ht_AK4', dataset = dataset, pt = ht_value_ak4, ht_bin = ht_bin, weight = weights.weight())
+                    # ht_value_ak4 = ak.sum(events0.GenJet[events0.GenJet.pt > 10].pt, axis = 1)
+                    
+                    # fill_hist(self.hists, 'ht_AK4', dataset = dataset, pt = ht_value_ak4, ht_bin = ht_bin, weight = weights.weight())
 
-                del ht_value, ht_value_ak4
+                    del ht_value, #ht_value_ak4
             else:
                 weights = Weights(size = len(events0), storeIndividual = True)
                 weights.add("unity", np.ones(len(events0)))
@@ -475,11 +494,14 @@ class QJetMassProcessor(processor.ProcessorABC):
                 self.logging.debug(f"Q2 weights (nom, up, down) : {q2_nom[:10]}")
                 weights.add(name = "q2", weight = q2_nom, weightUp = q2_up, weightDown = q2_down)
 
+                
                 isr_nom, isr_up, isr_down = GetPSweights(events0, "ISR")
-                weights.add(name = "isr", weight = isr_nom, weightUp = isr_up, weightDown = isr_down)
-
                 fsr_nom, fsr_up, fsr_down = GetPSweights(events0, "FSR")
-                weights.add(name = "fsr", weight = fsr_nom, weightUp = fsr_up, weightDown = fsr_down)
+                try:
+                    weights.add(name = "isr", weight = isr_nom, weightUp = isr_up, weightDown = isr_down)
+                    weights.add(name = "fsr", weight = fsr_nom, weightUp = fsr_up, weightDown = fsr_down)
+                except:
+                    pass
 
                 
             
@@ -497,27 +519,53 @@ class QJetMassProcessor(processor.ProcessorABC):
                     (is_muon & (events0.GenDressedLepton.pt > self.lepptcuts[1]))
                 )
                 
-                eta_cut = np.abs(events0.GenDressedLepton.eta) < 2.5
-
+                eta_cut = np.abs(events0.GenDressedLepton.eta) < 2.4
+                
                 events0 = ak.with_field(
                     events0,
                     events0.GenDressedLepton[pt_cut & eta_cut],
                     "GenDressedLepton"
                 )
 
+                ## Adding rapidity
+                events0 = ak.with_field(
+                    events0,
+                    ak.with_field(
+                        events0.GenJetAK8,
+                        getRapidity(events0.GenJetAK8),
+                        "rapidity"
+                    ),
+                    "GenJetAK8"
+                )
+                
                 events0 = ak.with_field(
                                     events0,
                                     events0.GenJetAK8[(events0.GenJetAK8.pt > 0)
-                                                & (np.abs(events0.GenJetAK8.eta) < 2.5)
+                                                & (np.abs(events0.GenJetAK8.rapidity) < 2.4)
                                     ],
                                     "GenJetAK8"
                 )
+                
+                genjets_clean = apply_lepton_separation_gen(
+                                events0.GenJetAK8,
+                                events0.GenDressedLepton,
+                                dr_cut=0.4
+                            )
+                events0 = ak.with_field(
+                            events0,
+                            genjets_clean[
+                                (genjets_clean.pt > 0)
+                                & (np.abs(genjets_clean.rapidity) < 2.4)
+                            ],
+                            "GenJetAK8"
+                        )
+
 
                 sel.add("oneGenJet", 
-                        ak.sum( (events0.GenJetAK8.pt > 0) & (np.abs(events0.GenJetAK8.eta) < 2.5), axis=1 ) >= 1
+                        ak.sum( (events0.GenJetAK8.pt > 0) & (np.abs(events0.GenJetAK8.rapidity) < 2.4), axis=1 ) >= 1
                     )
                 sel.add("oneGenJet_pt200", 
-                        ak.sum( (events0.GenJetAK8.pt > 200) & (np.abs(events0.GenJetAK8.eta) < 2.5), axis=1 ) >= 1
+                        ak.sum( (events0.GenJetAK8.pt > 200) & (np.abs(events0.GenJetAK8.rapidity) < 2.4), axis=1 ) >= 1
                     )
 
 
@@ -560,7 +608,7 @@ class QJetMassProcessor(processor.ProcessorABC):
 
             
 
-            # RECO Selection
+            # ----------------- RECO Selection ---------------------------
             self.logging.info("Entering RECO selection")
             
                 
@@ -795,20 +843,27 @@ class QJetMassProcessor(processor.ProcessorABC):
                                 dr_cut=0.4,
                             )
                 #recojets = events_j.FatJet
-                hem_sel = HEMVeto(recojets, events_j.run)
+                # if self._do_gen:
+                #     hem_weight = HEMVeto(FatJets, runs, isMC=self._do_gen, year = IOV)
+                # hem_sel = HEMVeto(recojets, events_j.run) #is not in HEM 15/16 region
                 
-
+                if self._do_gen and IOV == "2018":
+                    hem_weight = HEMVeto(events_j.FatJet, events_j.run, isMC=True)
+                    weights.add("HEM", hem_weight)
+                    hem_sel = ak.ones_like(events_j.event)
+                else:
+                    hem_sel = HEMVeto(recojets, events_j.run) #is not in HEM 15/16 region
+                
                 # sel.add("oneRecoJet", 
                 #             ak.sum( (events_j.FatJet.pt > 0) & (np.abs(events_j.FatJet.eta) < 2.5)  & (events_j.FatJet.jetId == 6) & hem_sel, axis=1 ) >= 1
                 #         )
 
                 sel.add("oneRecoJet",
-    ak.sum((recojets.pt > 0) & (np.abs(recojets.eta) < 2.5) & (recojets.jetId == 6), axis=1) >= 1
-)
+                    ak.sum((recojets.pt > 0) & (np.abs(recojets.eta) < 2.5) & (recojets.jetId == 6) & hem_sel, axis=1) >= 1 )
 
 
                 reco_jet, z_jet_dphi_reco = get_dphi( z_reco, recojets )
-            
+                
             
                 #reco_jet = ak.firsts(recojets)
 
@@ -871,17 +926,37 @@ class QJetMassProcessor(processor.ProcessorABC):
                 
                 toposel_reco = sel.require( z_pt_asym_sel_reco=True, z_jet_dphi_sel_reco=True)
                 sel.add("toposel_reco", toposel_reco)
+                if jet_syst == "nominal":
+                    ## N-1 for pt asym cut
+                    if self._do_gen:
+                        sel_n1_ptasym = sel.all("npv" , "MET" , "kinsel_reco", "z_jet_dphi_sel_reco") 
+                    else:
+                        sel_n1_ptasym = sel.all("npv" , "MET" , "kinsel_reco","trigsel", "z_jet_dphi_sel_reco" ) 
+    
+                    if ak.sum(sel_n1_ptasym)>0:
+                        self.logging.debug(f"Sum of this sel is {ak.sum(sel_n1_ptasym)}")
+                        self.logging.debug(f"Len? {len(z_pt_asym_reco[sel_n1_ptasym])}  ")
+                        
+                        #print(z_pt_asym_reco[sel_n1_ptasym])
+                        fill_hist(self.hists, "ptasym_presel", dataset = dataset, frac = z_pt_asym_reco[sel_n1_ptasym], weight = weights.weight()[sel_n1_ptasym])
+                
+                
                 if self._do_gen:
+                    import matplotlib.pyplot as plt
+                    #plt.hist(reco_jet.delta_r(gen_jet), bins = 100, range = (0,1))
+                    #plt.show()
                     is_matched_reco = reco_jet.delta_r(gen_jet) < 0.4
                     sel.add("is_matched_reco", is_matched_reco)
 
                     allsel_reco = sel.all("npv", "MET", "kinsel_reco", "toposel_reco")#, "is_matched_reco" )
+                    #plt.hist(reco_jet[allsel_reco].delta_r(gen_jet[allsel_reco]), bins = 1000, range = (0,4))
+                    #plt.show()
                     sel.add("allsel_reco", allsel_reco)
                     is_matched_gen = gen_jet.delta_r(reco_jet) < 0.4
                     sel.add("is_matched_gen", is_matched_gen)
                     allsel_gen = sel.all("kinsel_gen", "toposel_gen" , "is_matched_gen" )
                     sel.add("allsel_gen", allsel_gen)
-                    sel.add("fakes", sel.require(allsel_reco = True, allsel_gen = False))
+                    #sel.add("fakes", sel.require(allsel_reco = True, allsel_gen = False))
                 else:
                     allsel_reco = sel.all("npv", "MET", "kinsel_reco", "toposel_reco", "trigsel" )
                     sel.add("allsel_reco", allsel_reco)
@@ -901,9 +976,504 @@ class QJetMassProcessor(processor.ProcessorABC):
                 if jet_syst == "nominal":
                     fill_hist(self.hists, "ptz_mz_reco", dataset =  dataset, mass = z_reco[sel_reco].mass, pt = z_reco[sel_reco].pt, weight = weights.weight()[sel_reco]) 
 
+                #####-###-----------PLOTTING EVENTS ----___##
+
+
+                
+                # ------------------------------------------------------------
+                # Small helpers
+                # ------------------------------------------------------------
+                # def _to_1d_numpy(x):
+                #     if x is None:
+                #         return np.array([])
+                #     return ak.to_numpy(ak.flatten(ak.fill_none(x, []), axis=None))
+                
+                # def _wrap_phi(phi):
+                #     """Wrap phi into [0, 2pi) for polar plotting."""
+                #     phi = np.asarray(phi)
+                #     return np.mod(phi, 2 * np.pi)
+                
+                # def _event_collection(ev, name):
+                #     return getattr(ev, name) if name in ev.fields else None
+                
+                # def _plot_collection_polar(
+                #     ax,
+                #     coll,
+                #     label,
+                #     color=None,
+                #     marker="o",
+                #     open_marker=False,
+                #     annotate_pt=False,
+                #     max_r=None,
+                #     lw=1.5,
+                #     alpha=0.95,
+                # ):
+                #     """
+                #     Plot a single-event collection on polar plane:
+                #       theta = phi
+                #       r     = pt
+                #     """
+                #     if coll is None or len(coll) == 0:
+                #         return
+                
+                #     pt  = _to_1d_numpy(coll.pt)
+                #     phi = _wrap_phi(_to_1d_numpy(coll.phi))
+                
+                #     if len(pt) == 0:
+                #         return
+                
+                #     # scatter
+                #     if open_marker:
+                #         ax.scatter(phi, pt, marker=marker, s=65, facecolors="none",
+                #                    edgecolors=color, linewidths=lw, alpha=alpha, label=label)
+                #     else:
+                #         ax.scatter(phi, pt, marker=marker, s=45, color=color,
+                #                    linewidths=lw, alpha=alpha, label=label)
+                
+                #     # radial lines from origin
+                #     for p, ph in zip(pt, phi):
+                #         ax.plot([ph, ph], [0, p], color=color, alpha=0.35, lw=1.2)
+                
+                #     if annotate_pt:
+                #         for p, ph in zip(pt, phi):
+                #             ax.text(ph, p + 0.02 * (max_r if max_r is not None else np.max(pt) + 1),
+                #                     f"{p:.0f}", fontsize=7, ha="center", va="bottom")
+                
+                # def _plot_single_object_polar(
+                #     ax,
+                #     obj,
+                #     label,
+                #     color=None,
+                #     marker="D",
+                #     open_marker=False,
+                #     lw=2.0,
+                #     alpha=1.0,
+                # ):
+                #     """
+                #     Plot a single object (not a collection) that has pt, phi fields.
+                #     Works for ak.Record or one-element arrays.
+                #     """
+                #     if obj is None:
+                #         return
+                
+                #     try:
+                #         pt = ak.to_numpy(ak.atleast_1d(obj.pt))
+                #         phi = _wrap_phi(ak.to_numpy(ak.atleast_1d(obj.phi)))
+                #     except Exception:
+                #         return
+                
+                #     if len(pt) == 0:
+                #         return
+                
+                #     p = float(pt[0])
+                #     ph = float(phi[0])
+                
+                #     ax.plot([ph, ph], [0, p], color=color, alpha=0.5, lw=1.5)
+                
+                #     if open_marker:
+                #         ax.scatter([ph], [p], marker=marker, s=70, facecolors="none",
+                #                    edgecolors=color, linewidths=lw, alpha=alpha, label=label)
+                #     else:
+                #         ax.scatter([ph], [p], marker=marker, s=60, color=color,
+                #                    linewidths=lw, alpha=alpha, label=label)
+                
+                # def _compute_event_z_from_leptons(coll):
+                #     """
+                #     Approximate Z direction from first two leptons in a collection using vector sum in transverse plane.
+                #     Returns (pt, phi) or None.
+                #     """
+                #     if coll is None or len(coll) < 2:
+                #         return None
+                
+                #     try:
+                #         pt  = ak.to_numpy(coll.pt)
+                #         phi = ak.to_numpy(coll.phi)
+                #     except Exception:
+                #         return None
+                
+                #     if len(pt) < 2:
+                #         return None
+                
+                #     px = pt[0] * np.cos(phi[0]) + pt[1] * np.cos(phi[1])
+                #     py = pt[0] * np.sin(phi[0]) + pt[1] * np.sin(phi[1])
+                
+                #     z_pt = np.hypot(px, py)
+                #     z_phi = np.arctan2(py, px)
+                #     return {"pt": z_pt, "phi": z_phi}
+                
+                # def _plot_z_candidate(ax, zcand, label, color, ls="--", marker="p"):
+                #     if zcand is None:
+                #         return
+                #     ph = _wrap_phi(np.array([zcand["phi"]]))[0]
+                #     pt = zcand["pt"]
+                #     ax.plot([ph, ph], [0, pt], color=color, alpha=0.7, lw=1.6, ls=ls)
+                #     ax.scatter([ph], [pt], marker=marker, s=70, facecolors="none",
+                #                edgecolors=color, linewidths=1.8, label=label)
+                # def _mask_value(mask, iev):
+                #     if mask is None:
+                #         return "NA"
+                #     try:
+                #         return bool(mask[iev])
+                #     except Exception:
+                #         return "NA"
+                
+                # # ------------------------------------------------------------
+                # # Main plotting function
+                # # ------------------------------------------------------------
+
+                # def add_event_debug_panel(
+                #     ax,
+                #     iev,
+                #     allsel_reco,
+                #     allsel_gen,
+                #     npv_mask,
+                #     MET_mask,
+                #     kinsel_reco_mask,
+                #     toposel_reco_mask,
+                #     kinsel_gen_mask,
+                #     toposel_gen_mask,
+                #     is_matched_gen,
+                #     reco_jet,
+                #     gen_jet,
+                #     z_reco,
+                #     z_gen,
+                # ):
+                #     lines = []
+                
+                #     # --- selection bits ---
+                #     lines.append("Selection:")
+                #     lines.append(f" npv           : {_mask_value(npv_mask, iev)}")
+                #     lines.append(f" MET           : {_mask_value(MET_mask, iev)}")
+                #     lines.append(f" kinsel_reco   : {_mask_value(kinsel_reco_mask, iev)}")
+                #     lines.append(f" toposel_reco  : {_mask_value(toposel_reco_mask, iev)}")
+                #     lines.append(f" kinsel_gen    : {_mask_value(kinsel_gen_mask, iev)}")
+                #     lines.append(f" toposel_gen   : {_mask_value(toposel_gen_mask, iev)}")
+                #     lines.append(f" matched       : {_mask_value(is_matched_gen_mask, iev)}")
+                #     lines.append(f" allsel_reco   : {_mask_value(allsel_reco, iev)}")
+                #     lines.append(f" allsel_gen    : {_mask_value(allsel_gen, iev)}")
+                
+                #     # --- object info ---
+                #     try:
+                #         rj = reco_jet[iev]
+                #         gj = gen_jet[iev]
+                #         zr = z_reco[iev]
+                #         zg = z_gen[iev]
+                
+                #         lines.append("Reco jet:")
+                #         lines.append(f" pt = {float(rj.pt):.1f}")
+                #         lines.append(f" eta= {float(rj.eta):.2f}")
+                #         lines.append(f" phi= {float(rj.phi):.2f}")
+                #         lines.append("")
+                
+                #         lines.append("Gen jet:")
+                #         lines.append(f" pt = {float(gj.pt):.1f}")
+                #         lines.append(f" eta= {float(gj.eta):.2f}")
+                #         lines.append(f" phi= {float(gj.phi):.2f}")
+                #         lines.append("")
+                
+                #         lines.append("Reco Z:")
+                #         lines.append(f" pt = {float(zr.pt):.1f}")
+                #         lines.append(f" m  = {float(zr.mass):.1f}")
+                #         lines.append("")
+                
+                #         lines.append("Gen Z:")
+                #         lines.append(f" pt = {float(zg.pt):.1f}")
+                #         lines.append(f" m  = {float(zg.mass):.1f}")
+                #         lines.append("")
+                
+                #         lines.append("Derived:")
+                #         lines.append(f" dphi Z_reco-jet = {abs(float(zr.delta_phi(rj))):.3f}")
+                #         lines.append(f" dphi Z_gen-jet  = {abs(float(zg.delta_phi(gj))):.3f}")
+                #         lines.append(f" dR reco-gen jet = {float(rj.delta_r(gj)):.3f}")
+                #         lines.append(f" pt balance reco = {float(rj.pt/zr.pt):.3f}")
+                #         lines.append(f" pt balance gen  = {float(gj.pt/zg.pt):.3f}")
+                
+                #     except:
+                #         lines.append("Object info missing")
+                
+                #     text = "\n".join(lines)
+                
+                #     ax.text(
+                #         0.0,
+                #         1.0,
+                #         text,
+                #         fontsize=12,
+                #         verticalalignment="top",
+                #         horizontalalignment="left",
+                #         family="monospace",
+                #     )
+                # def plot_reco_not_gen_polar_events(
+                #     events_j,
+                #     allsel_reco,
+                #     allsel_gen,
+                #     reco_jet=None,
+                #     gen_jet=None,
+                #     z_reco=None,
+                #     z_gen=None,
+                #     npv_mask=None,
+                #     MET_mask=None,
+                #     kinsel_reco_mask=None,
+                #     toposel_reco_mask=None,
+                #     kinsel_gen_mask=None,
+                #     toposel_gen_mask=None,
+                #     is_matched_gen_mask=None,
+                #     outdir="outputs/plots/eventImage",
+                #     max_events=50,
+                # ):
+                #     os.makedirs(outdir, exist_ok=True)
+                
+                #     mask = ak.to_numpy(~allsel_reco & allsel_gen)
+                #     idxs = np.flatnonzero(mask)[:max_events]
+                
+                #     print(f"Found {mask.sum()} events with allsel_reco=True and allsel_gen=False")
+                #     print(f"Saving first {len(idxs)} event displays to {outdir}")
+                
+                #     for i, iev in enumerate(idxs):
+                #         ev = events_j[iev]
+                
+                #         # estimate a sensible radial max from all visible objects
+                #         pts_all = []
+                
+                #         for name in ["FatJet", "GenJetAK8", "Muon", "Electron", "GenDressedLepton"]:
+                #             if name in ev.fields and len(getattr(ev, name)) > 0:
+                #                 pts_all.extend(list(_to_1d_numpy(getattr(ev, name).pt)))
+                
+                #         if reco_jet is not None:
+                #             try:
+                #                 pts_all.append(float(ak.to_numpy(ak.atleast_1d(reco_jet[iev].pt))[0]))
+                #             except Exception:
+                #                 pass
+                
+                #         if gen_jet is not None:
+                #             try:
+                #                 pts_all.append(float(ak.to_numpy(ak.atleast_1d(gen_jet[iev].pt))[0]))
+                #             except Exception:
+                #                 pass
+                
+                #         rmax = max(50, 1.15 * max(pts_all)) if len(pts_all) else 100
+                
+                #         fig = plt.figure(figsize=(14, 8))
+                #         #gs = fig.add_gridspec(1, 2, width_ratios=[1.25, 0.9], wspace=0.15)
+                #         gs = fig.add_gridspec(1, 3, width_ratios=[1.25, 0.45, 0.9], wspace=0.1)
+                #         ax      = fig.add_subplot(gs[0, 0], projection="polar")
+                #         ax_leg  = fig.add_subplot(gs[0, 1])
+                #         ax_info = fig.add_subplot(gs[0, 2])
+                #         ax_leg.axis("off")
+                #         ax_info.axis("off")
+                        
+
+                
+                #         # --- Plot full collections ---
+                #         _plot_collection_polar(
+                #             ax, _event_collection(ev, "GenDressedLepton"),
+                #             label="Gen Dressed Lepton", color="royalblue",
+                #             marker="o", open_marker=True, annotate_pt=False, max_r=rmax
+                #         )
+                
+                #         _plot_collection_polar(
+                #             ax, _event_collection(ev, "Electron"),
+                #             label="Reco Electron", color="tab:green",
+                #             marker="s", open_marker=True, annotate_pt=False, max_r=rmax
+                #         )
+                
+                #         _plot_collection_polar(
+                #             ax, _event_collection(ev, "Muon"),
+                #             label="Reco Muon", color="tab:red",
+                #             marker="^", open_marker=True, annotate_pt=False, max_r=rmax
+                #         )
+                
+                #         _plot_collection_polar(
+                #             ax, _event_collection(ev, "GenJetAK8"),
+                #             label="Gen Jet", color="brown",
+                #             marker="D", open_marker=False, annotate_pt=True, max_r=rmax
+                #         )
+                
+                #         _plot_collection_polar(
+                #             ax, _event_collection(ev, "FatJet"),
+                #             label="Reco Jet", color="coral",
+                #             marker="D", open_marker=True, annotate_pt=True, max_r=rmax
+                #         )
+                
+                #         # --- Overlay selected reco/gen jet if provided ---
+                #         # if reco_jet is not None:
+                #         #     try:
+                #         #         _plot_single_object_polar(
+                #         #             ax, reco_jet[iev],
+                #         #             label="Selected Reco Jet", color="darkorange",
+                #         #             marker="D", open_marker=True, lw=2.6
+                #         #         )
+                #         #     except Exception:
+                #         #         pass
+                
+                #         # if gen_jet is not None:
+                #         #     try:
+                #         #         _plot_single_object_polar(
+                #         #             ax, gen_jet[iev],
+                #         #             label="Selected Gen Jet", color="darkred",
+                #         #             marker="D", open_marker=False, lw=2.6
+                #         #         )
+                #         #     except Exception:
+                #         #         pass
+                #         if reco_jet is not None:
+                #             try:
+                #                 _plot_single_object_polar(
+                #                     ax, reco_jet[iev],
+                #                     label="Selected Reco Jet",
+                #                     color="gold",
+                #                     marker="X",
+                #                     open_marker=False,
+                #                     lw=3.5,
+                #                     alpha=1.0,
+                #                 )
+                #             except Exception:
+                #                 pass
+                        
+                #         if gen_jet is not None:
+                #             try:
+                #                 _plot_single_object_polar(
+                #                     ax, gen_jet[iev],
+                #                     label="Selected Gen Jet",
+                #                     color="black",
+                #                     marker="*",
+                #                     open_marker=False,
+                #                     lw=3.5,
+                #                     alpha=1.0,
+                #                 )
+                #             except Exception:
+                #                 pass
+                
+                #         # --- Approximate Z from reco leptons ---
+                #         reco_z = None
+                #         if "Muon" in ev.fields and len(ev.Muon) >= 2:
+                #             reco_z = _compute_event_z_from_leptons(ev.Muon)
+                #         elif "Electron" in ev.fields and len(ev.Electron) >= 2:
+                #             reco_z = _compute_event_z_from_leptons(ev.Electron)
+                
+                #         gen_z = _compute_event_z_from_leptons(_event_collection(ev, "GenDressedLepton"))
+                
+                #         # _plot_z_candidate(ax, reco_z,  label="Gen Z",  color="magenta", ls="-.", marker="p")
+                #         # _plot_z_candidate(ax, gen_z, label="Reco Z", color="hotpink", ls="--", marker="p")
+
+                #         reco_z = None
+                #         gen_z  = None
+                        
+                #         if z_reco is not None:
+                #             try:
+                #                 reco_z = z_reco[iev]
+                #             except:
+                #                 pass
+                        
+                #         if z_gen is not None:
+                #             try:
+                #                 gen_z = z_gen[iev]
+                #             except:
+                #                 pass
+                        
+                #         _plot_single_object_polar(
+                #             ax, reco_z,
+                #             label="Reco Z",
+                #             color="hotpink",
+                #             marker="p",
+                #             open_marker=True,
+                #             lw=2.5,
+                #         )
+                        
+                #         _plot_single_object_polar(
+                #             ax, gen_z,
+                #             label="Gen Z",
+                #             color="magenta",
+                #             marker="p",
+                #             open_marker=False,
+                #             lw=2.5,
+                #         )
+                
+                #         # --- Optional Δφ between selected reco/gen jet ---
+                #         title = f"Event {iev}"
+                #         if reco_jet is not None and gen_jet is not None:
+                #             try:
+                #                 dphi = float(abs(reco_jet[iev].delta_phi(gen_jet[iev])))
+                #                 title += f"   Δ(φ) = {dphi:.4f}"
+                #             except Exception:
+                #                 pass
+                
+                #         ax.set_title(title, pad=28, fontsize=16)
+                #         ax.set_rmax(rmax)
+                #         ax.set_rlabel_position(22.5)
+                #         ax.set_xlabel(r"$\phi$ [rad]", labelpad=18)
+                #         ax.set_ylabel(r"$\rho = p_T$ [GeV]", labelpad=25)
+                #         ax.grid(True, alpha=0.65)
+                
+                #         handles, labels = ax.get_legend_handles_labels()
+                #         ax_leg.legend(
+                #             handles, labels,
+                #             loc="upper left",
+                #             fontsize=10,
+                #             frameon=True,
+                #         )
+
+                #         add_event_debug_panel(
+                #             ax_info,
+                #             iev,
+                #             allsel_reco,
+                #             allsel_gen,
+                #             npv_mask,
+                #             MET_mask,
+                #             kinsel_reco_mask,
+                #             toposel_reco_mask,
+                #             kinsel_gen_mask,
+                #             toposel_gen_mask,
+                #             is_matched_gen,
+                #             reco_jet,
+                #             gen_jet,
+                #             z_reco,
+                #             z_gen,
+                #         )
+                
+                #         fig.subplots_adjust(left=0.05, right=0.97, top=0.90, bottom=0.08)
+                #         fout = os.path.join(outdir, f"event_{i:03d}_entry_{iev}.png")
+                #         plt.savefig(fout, dpi=160)
+                #         plt.close(fig)
+                
+                #     return idxs
+                # npv_mask          = sel.require(npv=True)
+                # MET_mask          = sel.require(MET=True)
+                # kinsel_reco_mask  = sel.require(kinsel_reco=True)
+                # toposel_reco_mask = sel.require(toposel_reco=True)
+                # kinsel_gen_mask   = sel.require(kinsel_gen=True)
+                # toposel_gen_mask  = sel.require(toposel_gen=True)
+                # is_matched_gen_mask = sel.require(is_matched_gen=True)
+
+                # bad_idx = plot_reco_not_gen_polar_events(
+                #     events_j=events_j,
+                #     allsel_reco=allsel_reco,
+                #     allsel_gen=allsel_gen,
+                #     reco_jet=reco_jet,
+                #     gen_jet=gen_jet,
+                #     z_reco=z_reco,
+                #     z_gen=z_gen,
+                #     npv_mask=npv_mask,
+                #     MET_mask=MET_mask,
+                #     kinsel_reco_mask=kinsel_reco_mask,
+                #     toposel_reco_mask=toposel_reco_mask,
+                #     kinsel_gen_mask=kinsel_gen_mask,
+                #     toposel_gen_mask=toposel_gen_mask,
+                #     is_matched_gen_mask=is_matched_gen_mask,
+                #     outdir="outputs/plots/eventImage",
+                #     max_events=50,
+                # )
+
+                
+
+
+
+                ######-----------_#############
+                
                 # Fill histograms
                 # GEN level histograms
                 self.logging.debug(f"Total reco events passing all selection: {sel.require(allsel_reco = True).sum()}",  )
+                if self._do_gen:
+                    self.logging.debug(f"Total gen events passing all selection: {sel.require(allsel_gen = True).sum()}")
+                    self.logging.debug(f"Total events passing both reco and gen selections: {sel.require(allsel_reco = True, allsel_gen = True).sum()}")
                 self.logging.debug(f"Total reco events (ee channel) passing all selection: {sel.require(allsel_reco = True, twoReco_ee = True).sum()}",  )
                 self.logging.debug(f"Total reco events (mm channel) passing all selection: {sel.require(allsel_reco = True, twoReco_mm = True).sum()}",  )
                 self.logging.debug(f"Weights sample: {weights.weight()[sel_reco][:10]}" )
@@ -978,14 +1548,33 @@ class QJetMassProcessor(processor.ProcessorABC):
                                               mpt_gen = 2*np.log10(mgen_g/(ptgen*jetR)), weight = weights_gen, jk = jk_index, systematic = syst)
         
 
-                                #self.logging.debug(f"No of GEN JET {len(mgen)}")  
+
+
                                 else:
+                                    #self.logging.debug(f"No of GEN JET {len(mgen)}")  
+                                    partonFlavour = gen_jet_truth.partonFlavour
+                                    abs_pdg = abs(partonFlavour)
+    
+                                    is_quark = (
+                                        (abs_pdg == 1) |
+                                        (abs_pdg == 2) |
+                                        (abs_pdg == 3) |
+                                        (abs_pdg == 4) |
+                                        (abs_pdg == 5)
+                                    )
+                                    
+                                    is_gluon = (gen_jet_truth.partonFlavour == 21)
+    
+                                    parton_flavor = ak.where(is_quark, 1,
+                                      ak.where(is_gluon, 2, 0))
 
                                     fill_hist(self.hists, "ptjet_rhojet_u_gen", dataset = dataset, ptgen = ptgen,
                                               mpt_gen = 2*np.log10(mgen/(ptgen*jetR)), weight = weights_gen, systematic = syst)
                                     
                                     fill_hist(self.hists, "ptjet_rhojet_g_gen", dataset = dataset, ptgen = ptgen,
                                               mpt_gen = 2*np.log10(mgen_g/(ptgen*jetR)), weight = weights_gen, systematic = syst)
+
+                                    fill_hist(self.hists, "pt_flavor_jet0_gen", dataset = dataset, pt = ptgen, n = parton_flavor )
 
                                     
 
@@ -1329,13 +1918,16 @@ class QJetMassProcessor(processor.ProcessorABC):
                                 fill_hist(self.hists, "eta_Z", dataset = dataset, eta = eta_Z, systematic = syst, weight = weights_reco )
                                 fill_hist(self.hists, "phi_Z", dataset = dataset, phi = phi_Z, systematic = syst, weight = weights_reco )
                                 fill_hist(self.hists, "mass_Z", dataset = dataset, mass = mass_Z, systematic = syst, weight = weights_reco )
+                                fill_hist(self.hists, "y_Z", dataset = dataset, y = getRapidity(z_reco_meas), systematic = syst, weight = weights_reco)
+
                                 
                                 ## Jet
                                 fill_hist(self.hists, "pt_jet0", dataset = dataset, pt = ptreco, systematic = syst, weight = weights_reco )
                                 fill_hist(self.hists, "eta_jet0", dataset = dataset, eta = reco_jet_meas.eta, systematic = syst, weight = weights_reco )
                                 fill_hist(self.hists, "phi_jet0", dataset = dataset, phi = reco_jet_meas.phi, systematic = syst, weight = weights_reco )
                                 fill_hist(self.hists, "mass_jet0", dataset = dataset, mass = reco_jet_meas.mass, systematic = syst, weight = weights_reco )
-                                fill_hist(self.hists, "y_jet0", dataset = dataset, y = reco_jet_meas.y, systematic = syst, weight = weights_reco)
+                                fill_hist(self.hists, "y_jet0", dataset = dataset, y = reco_jet_meas.rapidity, systematic = syst, weight = weights_reco)
+                                fill_hist(self.hists, "eta_phi_jet_reco", dataset = dataset, eta = reco_jet_meas.eta, phi = reco_jet_meas.phi, weight = weights_reco)
 
                                 ## Combo
                                 fill_hist(self.hists, "ptasym", dataset = dataset, frac = ptasym, systematic = syst, weight = weights_reco)
@@ -1523,13 +2115,13 @@ class QJetMassProcessor(processor.ProcessorABC):
                             fill_hist(self.hists, "eta_Z", dataset = dataset, eta = eta_Z, systematic = jet_syst, weight = weights_reco )
                             fill_hist(self.hists, "phi_Z", dataset = dataset, phi = phi_Z, systematic = jet_syst, weight = weights_reco )
                             fill_hist(self.hists, "mass_Z", dataset = dataset, mass = mass_Z, systematic = jet_syst, weight = weights_reco )
-                            
+                            fill_hist(self.hists, "y_Z", dataset = dataset, y = getRapidity(z_reco_meas), systematic = jet_syst, weight = weights_reco)
                             ## Jet
                             fill_hist(self.hists, "pt_jet0", dataset = dataset, pt = ptreco, systematic = jet_syst, weight = weights_reco )
                             fill_hist(self.hists, "eta_jet0", dataset = dataset, eta = reco_jet_meas.eta, systematic = jet_syst, weight = weights_reco )
                             fill_hist(self.hists, "phi_jet0", dataset = dataset, phi = reco_jet_meas.phi, systematic = jet_syst, weight = weights_reco )
                             fill_hist(self.hists, "mass_jet0", dataset = dataset, mass = reco_jet_meas.mass, systematic = jet_syst, weight = weights_reco )
-                            fill_hist(self.hists, "y_jet0", dataset = dataset, y = reco_jet_meas.y, systematic = jet_syst, weight = weights_reco)
+                            fill_hist(self.hists, "y_jet0", dataset = dataset, y = reco_jet_meas.rapidity, systematic = jet_syst, weight = weights_reco)
 
                             ## Combo
                             fill_hist(self.hists, "ptasym", dataset = dataset, frac = ptasym, systematic = jet_syst, weight = weights_reco)

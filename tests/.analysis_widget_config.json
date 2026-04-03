@@ -1,0 +1,16 @@
+{
+  "casa": true,
+  "test": false,
+  "data": false,
+  "useDefault": false,
+  "mode": "validation",
+  "era": "2016",
+  "dataset": "pythia",
+  "pre": "outputs/validation",
+  "chunksize": 200000,
+  "chunksize_test": 200000,
+  "group_mode": "per_group",
+  "prependstr": "root://xcache/",
+  "systematics": "nominal",
+  "jet_systematics": "nominal"
+}
