@@ -134,10 +134,10 @@ def get_analysis_paths(repo_root: Path | None = None) -> AnalysisPaths:
     root = resolve_repo_root(repo_root)
     return AnalysisPaths(
         repo_root=root,
-        samples_data_dir=root / "tests" / "samples",
-        samples_mc_dir=root / "tests" / "samples_mc",
-        samples_bkg_dir=root / "tests" / "samples_mc" / "backgrounds",
-        samples_mc_local_dir=root / "tests" / "samples_mc" / "files",
+        samples_data_dir=root / "samples",
+        samples_mc_dir=root / "samples_mc",
+        samples_bkg_dir=root / "samples_mc" / "backgrounds",
+        samples_mc_local_dir=root / "samples_mc" / "files",
     )
 
 
@@ -276,7 +276,7 @@ def make_runner(
     workers: int = 1,
     chunksize: int = 200_000,
     maxchunks: int | None = 1,
-    skipbadfiles: bool = True,
+    skipbadfiles: bool = False,
 ):
     if use_dask:
         if client is None:
