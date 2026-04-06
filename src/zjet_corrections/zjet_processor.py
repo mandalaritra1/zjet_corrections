@@ -1524,6 +1524,7 @@ class QJetMassProcessor(processor.ProcessorABC):
                                 weights_reco = weights_reco * hem_weight[sel_reco]
                                 if self._do_gen:
                                     weights_both = weights_both * hem_weight[sel_both]
+                            mass_jk_fill = {"jk": jk_index} if self._mode == "mass_jk" else {}
                             if self._do_gen:
                                 gen_jet_truth = gen_jet[sel_gen]
                                 groomed_gen_jet_truth = groomed_gen_jet[sel_gen]
@@ -1537,7 +1538,6 @@ class QJetMassProcessor(processor.ProcessorABC):
                                 mgen_g = groomed_gen_jet_truth.mass
                                 mgen_g = mgen_g[~ak.is_none(mgen_g)]
                                 weights_gen = weights_gen[~ak.is_none(mgen)]
-                                mass_jk_fill = {"jk": jk_index} if self._mode == "mass_jk" else {}
 
                                 fill_hist(
                                     self.hists,
