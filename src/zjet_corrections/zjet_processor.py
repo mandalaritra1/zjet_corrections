@@ -857,9 +857,9 @@ class QJetMassProcessor(processor.ProcessorABC):
                 #     hem_weight = HEMVeto(FatJets, runs, isMC=self._do_gen, year = IOV)
                 # hem_sel = HEMVeto(recojets, events_j.run) #is not in HEM 15/16 region
                 
+                hem_weight = None
                 if self._do_gen and IOV == "2018":
                     hem_weight = HEMVeto(events_j.FatJet, events_j.run, isMC=True)
-                    weights.add("HEM", hem_weight)
                     hem_sel = ak.ones_like(events_j.event)
                 else:
                     hem_sel = HEMVeto(recojets, events_j.run) #is not in HEM 15/16 region
@@ -1520,6 +1520,10 @@ class QJetMassProcessor(processor.ProcessorABC):
                                 weights_reco = weights.weight(modifier=syst)[sel_reco]
                                 if self._do_gen:
                                     weights_both = weights.weight(modifier=syst)[sel_both]
+                            if hem_weight is not None:
+                                weights_reco = weights_reco * hem_weight[sel_reco]
+                                if self._do_gen:
+                                    weights_both = weights_both * hem_weight[sel_both]
                             if self._do_gen:
                                 gen_jet_truth = gen_jet[sel_gen]
                                 groomed_gen_jet_truth = groomed_gen_jet[sel_gen]

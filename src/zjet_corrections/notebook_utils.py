@@ -449,7 +449,7 @@ def save_output(out, fout: str | os.PathLike[str]):
 
 
 def default_output_dir(repo_root: Path | None = None) -> Path:
-    return get_analysis_paths(repo_root).repo_root / "tests" / "outputs"
+    return get_analysis_paths(repo_root).repo_root / "outputs"
 
 
 def make_output_filename(
