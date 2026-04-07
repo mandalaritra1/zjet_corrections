@@ -297,6 +297,12 @@ class QJetMassProcessor(processor.ProcessorABC):
             return "rho"
         return None
 
+    def _is_mass_reweight(self):
+        return self._reweight_mode() == "mass"
+
+    def _is_rho_reweight(self):
+        return self._reweight_mode() == "rho"
+
     def _reweight_value(self, mass, pt, jetR):
         mode = self._reweight_mode()
         if mode == "mass":
@@ -1565,6 +1571,21 @@ class QJetMassProcessor(processor.ProcessorABC):
                                 mgen_g = mgen_g[~ak.is_none(mgen_g)]
                                 weights_gen = weights_gen[~ak.is_none(mgen)]
 
+                                mpt_gen = 2*np.log10(mgen/(ptgen*jetR))
+                                mpt_gen_g = 2*np.log10(mgen_g/(ptgen*jetR))
+                                weights_gen_u = weights_gen
+                                weights_gen_g = weights_gen
+
+                                if self._do_reweight:
+                                    herwig_weight_u, herwig_weight_g = self._get_herwig_reweights(
+                                        ptgen,
+                                        mgen,
+                                        mgen_g,
+                                        jetR,
+                                    )
+                                    weights_gen_u = weights_gen * herwig_weight_u
+                                    weights_gen_g = weights_gen * herwig_weight_g
+
                                 fill_hist(
                                     self.hists,
                                     "ptjet_mjet_u_gen",
@@ -1572,7 +1593,7 @@ class QJetMassProcessor(processor.ProcessorABC):
                                     channel=channel,
                                     ptgen=ptgen,
                                     mgen=mgen,
-                                    weight=weights_gen,
+                                    weight=weights_gen_u if self._is_mass_reweight() else weights_gen,
                                     systematic=syst,
                                     **mass_jk_fill,
                                 )
@@ -1583,25 +1604,13 @@ class QJetMassProcessor(processor.ProcessorABC):
                                     channel=channel,
                                     ptgen=ptgen,
                                     mgen=mgen_g,
-                                    weight=weights_gen,
+                                    weight=weights_gen_g if self._is_mass_reweight() else weights_gen,
                                     systematic=syst,
                                     **mass_jk_fill,
                                 )
 
-                                mpt_gen = 2*np.log10(mgen/(ptgen*jetR))
-                                mpt_gen_g = 2*np.log10(mgen_g/(ptgen*jetR))
-
-                                herwig_weight_u, herwig_weight_g = self._get_herwig_reweights(
-                                    ptgen,
-                                    mgen,
-                                    mgen_g,
-                                    jetR,
-                                )
-
-                                if self._do_reweight:
+                                if self._do_reweight and self._is_rho_reweight():
                                     self.logging.debug("We are doing reweight right?")
-                                    weights_gen_u = weights_gen * herwig_weight_u
-                                    weights_gen_g = weights_gen * herwig_weight_g
                                     #self.logging.debug(f"And the weights are not false? {weights_gen_g}")
 
                                     fill_hist(self.hists, "ptjet_rhojet_u_gen", dataset = dataset, ptgen = ptgen,
@@ -1697,9 +1706,48 @@ class QJetMassProcessor(processor.ProcessorABC):
 
                                 
                                 jetR = 0.8
-                                fill_hist(self.hists, "response_matrix_u", dataset = dataset, channel = channel, ptreco = ptreco_both, mreco = mreco_both, ptgen = ptgen_both, mgen = mgen_both, systematic = syst, weight = weights_both, **mass_jk_fill)
+                                weights_both_u = weights_both
+                                weights_both_reweighted_g = weights_both_g
 
-                                fill_hist(self.hists, "response_matrix_g", dataset = dataset, channel = channel, ptreco = ptreco_both_g, mreco = mreco_both_g, ptgen = ptgen_both, mgen = mgen_both_g,systematic = syst, weight = weights_both, **mass_jk_fill)
+                                if self._do_reweight:
+                                    herwig_weight_both_u, herwig_weight_both_g = self._get_herwig_reweights(
+                                        ptreco_both,
+                                        mreco_both,
+                                        mreco_both_g,
+                                        jetR,
+                                    )
+                                    herwig_weight_both_g = ak.nan_to_num(herwig_weight_both_g, 0)
+                                    self.logging.debug(f"herwig WEights both g? {herwig_weight_both_g}" )
+                                    weights_both_u = weights_both * herwig_weight_both_u
+                                    weights_both_reweighted_g = weights_both_g * herwig_weight_both_g
+
+                                fill_hist(
+                                    self.hists,
+                                    "response_matrix_u",
+                                    dataset=dataset,
+                                    channel=channel,
+                                    ptreco=ptreco_both,
+                                    mreco=mreco_both,
+                                    ptgen=ptgen_both,
+                                    mgen=mgen_both,
+                                    systematic=syst,
+                                    weight=weights_both_u if self._is_mass_reweight() else weights_both,
+                                    **mass_jk_fill,
+                                )
+
+                                fill_hist(
+                                    self.hists,
+                                    "response_matrix_g",
+                                    dataset=dataset,
+                                    channel=channel,
+                                    ptreco=ptreco_both_g,
+                                    mreco=mreco_both_g,
+                                    ptgen=ptgen_both,
+                                    mgen=mgen_both_g,
+                                    systematic=syst,
+                                    weight=weights_both_reweighted_g if self._is_mass_reweight() else weights_both,
+                                    **mass_jk_fill,
+                                )
 
                                 # fill_hist(self.hists, 'm_u_jet_reco_over_gen', dataset = dataset, ptgen = ptgen_both, mgen = mgen_both, 
                                 #           frac = (mreco_both-mgen_both) /mgen_both, weight = weights_both)
@@ -1725,18 +1773,7 @@ class QJetMassProcessor(processor.ProcessorABC):
                                               mpt_reco = 2*np.log10(mreco_both_g/(ptreco_both*jetR)), ptgen = ptgen_both,
                                               mpt_gen = 2*np.log10(mgen_both_g/(ptgen_both*jetR)), 
                                               weight = weights_both, jk = jk_index, systematic = syst)
-                                elif self._do_reweight:
-
-                                    herwig_weight_both_u, herwig_weight_both_g = self._get_herwig_reweights(
-                                        ptreco_both,
-                                        mreco_both,
-                                        mreco_both_g,
-                                        jetR,
-                                    )
-                                    herwig_weight_both_g = ak.nan_to_num(herwig_weight_both_g, 0)
-                                    self.logging.debug(f"herwig WEights both g? {herwig_weight_both_g}" )
-                                    weights_both_g = weights_both_g * herwig_weight_both_g
-                                    weights_both_u = weights_both * herwig_weight_both_u
+                                elif self._do_reweight and self._is_rho_reweight():
                                     # self.logging.debug(f"WEights both g? {weights_both_g}" )
                                     # self.logging.debug(f"How many nan in weights_both_g? {ak.sum(ak.is_none(weights_both_g))}")
                                     # self.logging.debug(f"How many nan in mpt_reco? {ak.sum(ak.is_none(mpt_reco_both))}")
@@ -1773,7 +1810,7 @@ class QJetMassProcessor(processor.ProcessorABC):
                                     
                                     fill_hist(self.hists, "response_matrix_rho_g", dataset = dataset,  ptreco = ptreco_both,
                                               mpt_reco = mpt_reco_both_g, ptgen = ptgen_both,
-                                              mpt_gen = mpt_gen_both_g, systematic = syst, weight = weights_both_g)
+                                              mpt_gen = mpt_gen_both_g, systematic = syst, weight = weights_both_reweighted_g)
                                 
                                 else:
                                     fill_hist(self.hists, "response_matrix_rho_u", dataset = dataset,  ptreco = ptreco_both,
@@ -1899,8 +1936,41 @@ class QJetMassProcessor(processor.ProcessorABC):
                                 self.logging.debug(f"ptreco sample {ptreco[:10]}")
                                 self.logging.debug(f"mreco sample {mreco[:10]}")
                                 self.logging.debug(f"mreco_g sample {mreco_g[:10]}")
-                            fill_hist(self.hists, "ptjet_mjet_u_reco", dataset = dataset, channel = channel, ptreco = ptreco, mreco = mreco, systematic = syst, weight = weights_reco, **mass_jk_fill)
-                            fill_hist(self.hists, "ptjet_mjet_g_reco", dataset = dataset, channel = channel, ptreco = ptreco_g, mreco = mreco_g, systematic = syst, weight = weights_reco_g, **mass_jk_fill)
+                            weights_reco_u = weights_reco
+                            weights_reco_reweighted_g = weights_reco_g
+
+                            if self._do_reweight:
+                                herwig_weight_reco_u, herwig_weight_reco_g = self._get_herwig_reweights(
+                                    ptreco,
+                                    mreco,
+                                    mreco_g,
+                                    jetR,
+                                )
+                                weights_reco_u = weights_reco * herwig_weight_reco_u
+                                weights_reco_reweighted_g = weights_reco_g * herwig_weight_reco_g
+
+                            fill_hist(
+                                self.hists,
+                                "ptjet_mjet_u_reco",
+                                dataset=dataset,
+                                channel=channel,
+                                ptreco=ptreco,
+                                mreco=mreco,
+                                systematic=syst,
+                                weight=weights_reco_u if self._is_mass_reweight() else weights_reco,
+                                **mass_jk_fill,
+                            )
+                            fill_hist(
+                                self.hists,
+                                "ptjet_mjet_g_reco",
+                                dataset=dataset,
+                                channel=channel,
+                                ptreco=ptreco_g,
+                                mreco=mreco_g,
+                                systematic=syst,
+                                weight=weights_reco_reweighted_g if self._is_mass_reweight() else weights_reco_g,
+                                **mass_jk_fill,
+                            )
 
 
                                 
@@ -1912,20 +1982,12 @@ class QJetMassProcessor(processor.ProcessorABC):
                             
                                 fill_hist(self.hists, "ptjet_rhojet_g_reco", dataset = dataset, ptreco = ptreco_g,
                                           mpt_reco = 2*np.log10(mreco_g/(ptreco*jetR)), jk = jk_index, weight = weights_reco_g, systematic = syst)
-                            elif self._do_reweight:
-                                herwig_weight_reco_u, herwig_weight_reco_g = self._get_herwig_reweights(
-                                    ptreco,
-                                    mreco,
-                                    mreco_g,
-                                    jetR,
-                                )
-                                weights_reco_g = weights_reco_g * herwig_weight_reco_g
-                                weights_reco_u = weights_reco * herwig_weight_reco_u
+                            elif self._do_reweight and self._is_rho_reweight():
                                 fill_hist(self.hists, "ptjet_rhojet_u_reco", dataset = dataset, ptreco = ptreco,
                                       mpt_reco = 2*np.log10(mreco/(ptreco*jetR)), systematic = syst, weight = weights_reco_u)
                             
                                 fill_hist(self.hists, "ptjet_rhojet_g_reco", dataset = dataset, ptreco = ptreco_g,
-                                          mpt_reco = 2*np.log10(mreco_g/(ptreco*jetR)), systematic = syst, weight = weights_reco_g)
+                                          mpt_reco = 2*np.log10(mreco_g/(ptreco*jetR)), systematic = syst, weight = weights_reco_reweighted_g)
                             else: # regular cases
                                 
                                 ### Required input distributions
