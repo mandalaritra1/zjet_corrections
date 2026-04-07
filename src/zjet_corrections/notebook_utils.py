@@ -21,6 +21,7 @@ HT_BINS = [
 ]
 
 DATASET_OPTIONS = [
+    "data",
     "pythia",
     "pythia_local",
     "pythia2",
@@ -32,7 +33,7 @@ DATASET_OPTIONS = [
 
 ERA_OPTIONS = ["2016", "2016APV", "2017", "2018", "all"]
 
-RHO_MODE_OPTIONS = ["validation", "minimal_rho", "rho_jk"]
+RHO_MODE_OPTIONS = ["validation", "minimal_rho", "reweight_pythia_rho", "rho_jk"]
 MASS_MODE_OPTIONS = ["mass", "mass_reweight", "mass_jk", "mass_jk_mc", "mass_jk_data"]
 MODE_OPTIONS = RHO_MODE_OPTIONS + MASS_MODE_OPTIONS
 SYSTEMATIC_PROFILE_OPTIONS = ["all_syst", "minimal_syst", "no_syst"]

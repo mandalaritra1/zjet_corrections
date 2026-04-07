@@ -126,27 +126,27 @@ def _resolve_jec_tags(iov: str):
         )
     raise ValueError(f"Unsupported IOV '{iov}' for jet energy corrections")
 
-class PtRhoWeighter:
-    def __init__(self, npz_path: str):
+class PtVarWeighter:
+    def __init__(self, npz_path: str, grid_key: str):
         dat = np.load(npz_path, allow_pickle=True)
         self.pt_edges = np.asarray(dat["pt_edges"], dtype=float)
-        self.rho_grids = dat["rho_grids"]   # object array
-        self.w_grids = dat["w_grids"]       # object array
+        self.var_grids = dat[grid_key]
+        self.w_grids = dat["w_grids"]
 
     def _pt_bin(self, pt: float) -> int:
         k = np.searchsorted(self.pt_edges, pt, side="right") - 1
         return int(np.clip(k, 0, len(self.pt_edges) - 2))
 
-    def weight(self, pt: float, rho: float) -> float:
+    def weight(self, pt: float, value: float) -> float:
         k = self._pt_bin(pt)
-        x = np.asarray(self.rho_grids[k], dtype=float)
+        x = np.asarray(self.var_grids[k], dtype=float)
         w = np.asarray(self.w_grids[k], dtype=float)
-        return float(np.interp(rho, x, w, left=w[0], right=w[-1]))
+        return float(np.interp(value, x, w, left=w[0], right=w[-1]))
 
-    def weight_array(self, pt_arr, rho_arr):
+    def weight_array(self, pt_arr, value_arr):
         pt_arr = np.asarray(pt_arr, dtype=float)
-        rho_arr = np.asarray(rho_arr, dtype=float)
-        out = np.empty_like(rho_arr, dtype=float)
+        value_arr = np.asarray(value_arr, dtype=float)
+        out = np.empty_like(value_arr, dtype=float)
 
         k_arr = np.searchsorted(self.pt_edges, pt_arr, side="right") - 1
         k_arr = np.clip(k_arr, 0, len(self.pt_edges) - 2)
@@ -155,25 +155,38 @@ class PtRhoWeighter:
             mask = (k_arr == k)
             if not np.any(mask):
                 continue
-            x = np.asarray(self.rho_grids[k], dtype=float)
+            x = np.asarray(self.var_grids[k], dtype=float)
             w = np.asarray(self.w_grids[k], dtype=float)
-            out[mask] = np.interp(rho_arr[mask], x, w, left=w[0], right=w[-1])
+            out[mask] = np.interp(value_arr[mask], x, w, left=w[0], right=w[-1])
 
         return out
-        
-from importlib.resources import files, as_file
+
+
+PtRhoWeighter = PtVarWeighter
+
+
+def _get_herwig_weight_resource(is_groomed: bool, mode: str) -> tuple[str, str]:
+    if mode == "rho":
+        filename = "spline_groomed.npz" if is_groomed else "spline_ungroomed.npz"
+        return filename, "rho_grids"
+    if mode == "mass":
+        filename = "mass_spline_groomed.npz" if is_groomed else "mass_spline_ungroomed.npz"
+        return filename, "mass_grids"
+    raise ValueError(f"Unsupported reweight mode '{mode}'. Expected 'rho' or 'mass'.")
 
 @lru_cache(maxsize=None)
-def get_herwig_weight_g() -> PtRhoWeighter:
-    resource = files("zjet_corrections") / "corrections" / "spline_groomed.npz"
+def get_herwig_weight_g(mode: str = "rho") -> PtVarWeighter:
+    filename, grid_key = _get_herwig_weight_resource(is_groomed=True, mode=mode)
+    resource = files("zjet_corrections") / "corrections" / filename
     with as_file(resource) as p:          # p is a real pathlib.Path on disk
-        return PtRhoWeighter(p)
+        return PtVarWeighter(p, grid_key)
 
 @lru_cache(maxsize=None)
-def get_herwig_weight_u() -> PtRhoWeighter:
-    resource = files("zjet_corrections") / "corrections" / "spline_ungroomed.npz"
+def get_herwig_weight_u(mode: str = "rho") -> PtVarWeighter:
+    filename, grid_key = _get_herwig_weight_resource(is_groomed=False, mode=mode)
+    resource = files("zjet_corrections") / "corrections" / filename
     with as_file(resource) as p:
-        return PtRhoWeighter(p)
+        return PtVarWeighter(p, grid_key)
 
 @lru_cache(maxsize=None)
 def get_rocc_corrections(iov=None) -> RoccoR:
