@@ -1,5 +1,6 @@
 import pickle as pkl
 import matplotlib.pyplot as plt
+from matplotlib.colors import LogNorm
 import hist
 from . import hep_plot as hplot
 import matplotlib.patches as patches
@@ -176,12 +177,51 @@ def plot_raw_mass_groomed_vs_ungroomed(
     hplot.quick_label(
         data=data,
         xlabel=r"Raw ungroomed jet mass [GeV]",
-        ylabel=r"Raw groomed jet mass [GeV]",
+        ylabel=r"Raw groomed jet mass from subjets [GeV]",
         cms_text="Simulation Internal" if not data else "Preliminary",
     )
     cbar = plt.gcf().axes[-1]
     cbar.set_ylabel("# Events")
     hplot.show()
+
+
+def plot_reco_jet_ntuple_raw_mass_map(
+    out,
+    era="2018",
+    data=False,
+    bins=40,
+    mass_range=(0, 200),
+):
+    if "reco_jet_ntuple" not in out:
+        raise KeyError("Output is missing 'reco_jet_ntuple'. Run mass_diagnostic_ntuple mode.")
+
+    hplot.setup(era=era)
+    hplot.set_plot_name("ntuple_raw_groomed_vs_ungroomed_mass")
+
+    ntuple = out["reco_jet_ntuple"]
+    ungroomed = ntuple["mass_raw"].value
+    groomed = ntuple["msoftdrop_raw"].value
+    weight = ntuple["weight"].value
+
+    fig, ax = plt.subplots()
+    counts, xedges, yedges, image = ax.hist2d(
+        ungroomed,
+        groomed,
+        bins=bins,
+        range=[mass_range, mass_range],
+        weights=weight,
+        norm=LogNorm(),
+    )
+    ax.plot(mass_range, mass_range, color="white", linestyle="--", linewidth=1.0)
+    hplot.quick_label(
+        data=data,
+        xlabel=r"Raw ungroomed jet mass [GeV]",
+        ylabel=r"Raw groomed jet mass from subjets [GeV]",
+        cms_text="Simulation Internal" if not data else "Preliminary",
+    )
+    cbar = fig.colorbar(image, ax=ax)
+    cbar.set_label("# Events")
+    hplot.show(fig=fig)
 
 
 def plot_raw_mass_overlay(

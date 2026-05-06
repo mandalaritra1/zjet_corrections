@@ -16,6 +16,7 @@ class QJetMassProcessor(_QJetMassProcessor):
         "mass_jk": "mass_jk",
         "mass_jk_mc": "mass_jk",
         "mass_jk_data": "mass_jk",
+        "mass_diagnostic_ntuple": "mass_diagnostic_ntuple",
     }
 
     _ALLOWED_MODES = {
@@ -24,6 +25,7 @@ class QJetMassProcessor(_QJetMassProcessor):
         "mass_jk",
         "jk_mc",
         "jk_data",
+        "mass_diagnostic_ntuple",
     }
 
     def __init__(

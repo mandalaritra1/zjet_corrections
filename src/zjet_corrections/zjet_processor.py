@@ -64,6 +64,7 @@ class QJetMassProcessor(processor.ProcessorABC):
         self._debug = debug
         self._do_reweight = False
         self._do_jk = False
+        self._do_reco_jet_ntuple = mode == "mass_diagnostic_ntuple"
 
         if mode == "minimal":
             self._do_jk = False
@@ -101,6 +102,10 @@ class QJetMassProcessor(processor.ProcessorABC):
                                     'l1prefiringUp', 'l1prefiringDown'] 
         else:
             self.systematics = systematics
+
+        if self._do_reco_jet_ntuple:
+            self.jet_systematics = ["nominal"]
+            self.systematics = ["nominal"]
         
 
         self.lepptcuts = [40,29] # [ele, mu]
@@ -303,6 +308,9 @@ class QJetMassProcessor(processor.ProcessorABC):
             register_hist(self.hists, "jk_ptjet_mjet_g_reco", [dataset_axis,ptreco_axis, mreco_axis, binning.jackknife_axis])
             register_hist(self.hists, "jk_ptjet_mjet_u_reco", [dataset_axis,ptreco_axis, mreco_axis, binning.jackknife_axis])
 
+        if self._do_reco_jet_ntuple:
+            self._register_reco_jet_ntuple()
+
         
         self.hists["sumw"] = processor.defaultdict_accumulator(float)
         self.hists["nev"] = processor.defaultdict_accumulator(int)
@@ -341,20 +349,160 @@ class QJetMassProcessor(processor.ProcessorABC):
         herwig_weight_u = get_herwig_weight_u(mode=mode).weight_array(pt, ungroomed_value)
         return herwig_weight_u, herwig_weight_g
 
+    def _register_reco_jet_ntuple(self):
+        float_columns = [
+            "weight",
+            "pt",
+            "mass",
+            "msoftdrop",
+            "eta",
+            "phi",
+            "rapidity",
+            "pt_nanoaod",
+            "mass_nanoaod",
+            "msoftdrop_nanoaod",
+            "pt_raw",
+            "mass_raw",
+            "msoftdrop_raw",
+        ]
+        uint64_columns = ["event"]
+        uint32_columns = ["run", "luminosityBlock"]
+        object_columns = ["dataset", "channel", "systematic"]
+
+        columns = {}
+        for name in float_columns:
+            columns[name] = processor.column_accumulator(np.array([], dtype=np.float64))
+        for name in uint64_columns:
+            columns[name] = processor.column_accumulator(np.array([], dtype=np.uint64))
+        for name in uint32_columns:
+            columns[name] = processor.column_accumulator(np.array([], dtype=np.uint32))
+        for name in object_columns:
+            columns[name] = processor.column_accumulator(np.array([], dtype=object))
+
+        self.hists["reco_jet_ntuple"] = processor.dict_accumulator(columns)
+
     @staticmethod
-    def _with_raw_reco_mass_fields(fatjets):
-        raw_ungroomed_mass = (1 - fatjets.rawFactor) * fatjets.mass
+    def _to_numpy_column(values, dtype=np.float64):
+        if isinstance(values, np.ndarray):
+            return np.asarray(values, dtype=dtype)
+        return np.asarray(ak.to_numpy(ak.fill_none(values, np.nan)), dtype=dtype)
+
+    def _fill_reco_jet_ntuple(
+        self,
+        dataset,
+        channel,
+        systematic,
+        events,
+        reco_jet,
+        weight,
+    ):
+        if "reco_jet_ntuple" not in self.hists:
+            return
+
+        nrows = len(reco_jet.pt)
+        if nrows == 0:
+            return
+
+        ntuple = self.hists["reco_jet_ntuple"]
+        ntuple["dataset"] += processor.column_accumulator(np.full(nrows, dataset, dtype=object))
+        ntuple["channel"] += processor.column_accumulator(np.full(nrows, channel, dtype=object))
+        ntuple["systematic"] += processor.column_accumulator(np.full(nrows, systematic, dtype=object))
+        ntuple["weight"] += processor.column_accumulator(self._to_numpy_column(weight))
+
+        ntuple["run"] += processor.column_accumulator(self._to_numpy_column(events.run, dtype=np.uint32))
+        ntuple["luminosityBlock"] += processor.column_accumulator(
+            self._to_numpy_column(events.luminosityBlock, dtype=np.uint32)
+        )
+        ntuple["event"] += processor.column_accumulator(self._to_numpy_column(events.event, dtype=np.uint64))
+
+        ntuple["pt"] += processor.column_accumulator(self._to_numpy_column(reco_jet.pt))
+        ntuple["mass"] += processor.column_accumulator(self._to_numpy_column(reco_jet.mass))
+        ntuple["msoftdrop"] += processor.column_accumulator(self._to_numpy_column(reco_jet.msoftdrop))
+        ntuple["eta"] += processor.column_accumulator(self._to_numpy_column(reco_jet.eta))
+        ntuple["phi"] += processor.column_accumulator(self._to_numpy_column(reco_jet.phi))
+        ntuple["rapidity"] += processor.column_accumulator(self._to_numpy_column(reco_jet.rapidity))
+
+        ntuple["pt_nanoaod"] += processor.column_accumulator(self._to_numpy_column(reco_jet.pt_nanoaod))
+        ntuple["mass_nanoaod"] += processor.column_accumulator(self._to_numpy_column(reco_jet.mass_nanoaod))
+        ntuple["msoftdrop_nanoaod"] += processor.column_accumulator(
+            self._to_numpy_column(reco_jet.msoftdrop_nanoaod)
+        )
+
+        ntuple["pt_raw"] += processor.column_accumulator(self._to_numpy_column(reco_jet.pt_raw_diagnostic))
+        ntuple["mass_raw"] += processor.column_accumulator(self._to_numpy_column(reco_jet.mass_raw_diagnostic))
+        ntuple["msoftdrop_raw"] += processor.column_accumulator(
+            self._to_numpy_column(reco_jet.msoftdrop_raw_diagnostic)
+        )
+
+    @staticmethod
+    def _with_reco_mass_diagnostic_fields(fatjets):
         fatjets = ak.with_field(
             fatjets,
-            raw_ungroomed_mass,
-            "mass_raw_ungroomed",
+            fatjets.pt,
+            "pt_nanoaod",
+        )
+        fatjets = ak.with_field(
+            fatjets,
+            fatjets.mass,
+            "mass_nanoaod",
         )
         fatjets = ak.with_field(
             fatjets,
             fatjets.msoftdrop,
-            "mass_raw_groomed",
+            "msoftdrop_nanoaod",
+        )
+        fatjets = ak.with_field(
+            fatjets,
+            (1 - fatjets.rawFactor) * fatjets.pt,
+            "pt_raw_diagnostic",
+        )
+        fatjets = ak.with_field(
+            fatjets,
+            (1 - fatjets.rawFactor) * fatjets.mass,
+            "mass_raw_diagnostic",
         )
         return fatjets
+
+    @staticmethod
+    def _mass_from_pt_eta_phi_m(pt1, eta1, phi1, mass1, pt2, eta2, phi2, mass2):
+        px = pt1 * np.cos(phi1) + pt2 * np.cos(phi2)
+        py = pt1 * np.sin(phi1) + pt2 * np.sin(phi2)
+        pz = pt1 * np.sinh(eta1) + pt2 * np.sinh(eta2)
+        energy1 = np.sqrt((pt1 * np.cosh(eta1)) ** 2 + mass1**2)
+        energy2 = np.sqrt((pt2 * np.cosh(eta2)) ** 2 + mass2**2)
+        mass2_pair = (energy1 + energy2) ** 2 - px**2 - py**2 - pz**2
+        return np.sqrt(np.maximum(mass2_pair, 0))
+
+    @classmethod
+    def _with_raw_softdrop_mass_from_subjets(cls, fatjets, subjets):
+        raw_subjets = ak.with_field(
+            subjets,
+            (1 - subjets.rawFactor) * subjets.pt,
+            "pt_raw_diagnostic",
+        )
+        raw_subjets = ak.with_field(
+            raw_subjets,
+            (1 - subjets.rawFactor) * subjets.mass,
+            "mass_raw_diagnostic",
+        )
+
+        subjet1 = raw_subjets[fatjets.subJetIdx1]
+        subjet2 = raw_subjets[fatjets.subJetIdx2]
+        raw_softdrop_mass = cls._mass_from_pt_eta_phi_m(
+            subjet1.pt_raw_diagnostic,
+            subjet1.eta,
+            subjet1.phi,
+            subjet1.mass_raw_diagnostic,
+            subjet2.pt_raw_diagnostic,
+            subjet2.eta,
+            subjet2.phi,
+            subjet2.mass_raw_diagnostic,
+        )
+        return ak.with_field(
+            fatjets,
+            raw_softdrop_mass,
+            "msoftdrop_raw_diagnostic",
+        )
 
     def _fill_groomed_over_ungroomed_reco(
         self,
@@ -824,10 +972,11 @@ class QJetMassProcessor(processor.ProcessorABC):
 
             ## Storing jec variation in the main 'Events' class
             
-            fatjets_with_raw_mass = self._with_raw_reco_mass_fields(events0.FatJet)
-            corr_jets = GetJetCorrections(fatjets_with_raw_mass, events0, era, IOV, isData = not self._do_gen, mode='AK8')  ###### correcting FatJet.mass
-            corr_jets = corr_jets[corr_jets.subJetIdx1 > -1]
-            del fatjets_with_raw_mass
+            fatjets_with_mass_diagnostics = self._with_reco_mass_diagnostic_fields(events0.FatJet)
+            corr_jets = GetJetCorrections(fatjets_with_mass_diagnostics, events0, era, IOV, isData = not self._do_gen, mode='AK8')  ###### correcting FatJet.mass
+            corr_jets = corr_jets[(corr_jets.subJetIdx1 > -1) & (corr_jets.subJetIdx2 > -1)]
+            corr_jets = self._with_raw_softdrop_mass_from_subjets(corr_jets, events0.SubJet)
+            del fatjets_with_mass_diagnostics
 
             ## Storing the jec variations for the AK4 subjets
             corr_subjets = GetJetCorrections(events0.SubJet, events0, era, IOV, isData = not self._do_gen, mode = 'AK4')
@@ -1943,13 +2092,21 @@ class QJetMassProcessor(processor.ProcessorABC):
                                     dataset=dataset,
                                     channel=channel,
                                     ptreco=ptreco,
-                                    ungroomed_mass=reco_jet_meas.mass_raw_ungroomed,
-                                    groomed_mass=reco_jet_meas.mass_raw_groomed,
+                                    ungroomed_mass=reco_jet_meas.mass_raw_diagnostic,
+                                    groomed_mass=reco_jet_meas.msoftdrop_raw_diagnostic,
                                     weight=weights_reco,
                                     systematic=syst,
                                     mass_ratio_name="m_g_over_m_u_raw_reco",
                                     mass_2d_name="m_g_vs_m_u_raw_reco",
                                     **mass_jk_fill,
+                                )
+                                self._fill_reco_jet_ntuple(
+                                    dataset=dataset,
+                                    channel=channel,
+                                    systematic=syst,
+                                    events=events_j[sel_reco],
+                                    reco_jet=reco_jet_meas,
+                                    weight=weights_reco,
                                 )
 
                             ptreco = ptreco[~ak.is_none(mreco)]
