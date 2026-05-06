@@ -112,6 +112,19 @@ def test_mass_diagnostic_ntuple_mode_books_only_ntuple_and_metadata():
     )
 
 
+def test_mass_diagnostic_ntuple_postprocess_skips_ntuple_accumulator():
+    proc = QJetMassProcessor(
+        do_gen=False,
+        mode="mass_diagnostic_ntuple",
+        jet_systematics=["nominal"],
+        systematics=["nominal"],
+    )
+
+    out = proc.postprocess(proc.hists)
+
+    assert out["reco_jet_ntuple"] is proc.hists["reco_jet_ntuple"]
+
+
 def test_raw_mass_ratio_fill_rejects_none_zero_and_nonfinite_values():
     proc = QJetMassProcessor(
         do_gen=False,

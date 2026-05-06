@@ -2631,6 +2631,8 @@ class QJetMassProcessor(processor.ProcessorABC):
         for hname in hname_list:
             
             h = accumulator[hname]
+            if not hasattr(h, "axes") or "dataset" not in h.axes.name:
+                continue
             for i,ds in enumerate(h.axes['dataset']):
                 if ds.startswith("SingleMuon") or ds.startswith("EGamma") or ds.startswith("SingleElectron"):
                     continue
