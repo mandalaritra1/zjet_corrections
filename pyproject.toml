@@ -21,6 +21,9 @@ dask = [
     "dask-awkward",
     "fsspec-xrootd>=0.5.1",
 ]
+test = [
+    "pytest>=8",
+]
 
 [tool.setuptools.package-data]
 "zjet_corrections" = ["corrections/**/*"]

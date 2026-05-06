@@ -171,6 +171,8 @@ class QJetMassProcessor(processor.ProcessorABC):
             register_hist(self.hists, "ptjet_mjet_g_reco", [dataset_axis,channel_axis, ptreco_axis, mreco_axis, syst_axis])
             register_hist(self.hists, "m_g_over_m_u_reco", [dataset_axis, channel_axis, ptreco_axis, mass_ratio_axis, syst_axis])
             register_hist(self.hists, "m_g_vs_m_u_reco", [dataset_axis, channel_axis, m_u_reco_5gev_axis, m_g_reco_5gev_axis, syst_axis])
+            register_hist(self.hists, "m_g_over_m_u_raw_reco", [dataset_axis, channel_axis, ptreco_axis, mass_ratio_axis, syst_axis])
+            register_hist(self.hists, "m_g_vs_m_u_raw_reco", [dataset_axis, channel_axis, m_u_reco_5gev_axis, m_g_reco_5gev_axis, syst_axis])
 
             if self._do_gen:
                 register_hist(self.hists, "response_matrix_u", [dataset_axis, channel_axis, ptreco_axis, mreco_axis, ptgen_axis, mgen_axis, syst_axis])
@@ -184,6 +186,8 @@ class QJetMassProcessor(processor.ProcessorABC):
             register_hist(self.hists, "ptjet_rhojet_g_reco", [dataset_axis, ptreco_axis, mreco_over_pt_axis, syst_axis ])
             register_hist(self.hists, "m_g_over_m_u_reco", [dataset_axis, channel_axis, ptreco_axis, mass_ratio_axis, syst_axis])
             register_hist(self.hists, "m_g_vs_m_u_reco", [dataset_axis, channel_axis, m_u_reco_5gev_axis, m_g_reco_5gev_axis, syst_axis])
+            register_hist(self.hists, "m_g_over_m_u_raw_reco", [dataset_axis, channel_axis, ptreco_axis, mass_ratio_axis, syst_axis])
+            register_hist(self.hists, "m_g_vs_m_u_raw_reco", [dataset_axis, channel_axis, m_u_reco_5gev_axis, m_g_reco_5gev_axis, syst_axis])
             #register_hist(self.hists, "ptjet_rhojet_g_reco2", [dataset_axis, ptreco_axis, mreco_over_pt_axis, syst_axis ])
 
             if self._do_gen:
@@ -242,6 +246,8 @@ class QJetMassProcessor(processor.ProcessorABC):
             register_hist(self.hists, "ptjet_rhojet_g_reco", [dataset_axis, ptreco_axis, mreco_over_pt_axis, syst_axis ])
             register_hist(self.hists, "m_g_over_m_u_reco", [dataset_axis, channel_axis, ptreco_axis, mass_ratio_axis, syst_axis])
             register_hist(self.hists, "m_g_vs_m_u_reco", [dataset_axis, channel_axis, m_u_reco_5gev_axis, m_g_reco_5gev_axis, syst_axis])
+            register_hist(self.hists, "m_g_over_m_u_raw_reco", [dataset_axis, channel_axis, ptreco_axis, mass_ratio_axis, syst_axis])
+            register_hist(self.hists, "m_g_vs_m_u_raw_reco", [dataset_axis, channel_axis, m_u_reco_5gev_axis, m_g_reco_5gev_axis, syst_axis])
             
             #register_hist(self.hists, "ht", [dataset_axis, ptlong_axis, ht_axis ])
             #register_hist(self.hists, "eta_phi_jet_reco", [dataset_axis, eta_axis, phi_axis])
@@ -279,6 +285,8 @@ class QJetMassProcessor(processor.ProcessorABC):
             register_hist(self.hists, "ptjet_mjet_g_reco", [dataset_axis, channel_axis, ptreco_axis, mreco_axis, binning.jackknife_axis, syst_axis])
             register_hist(self.hists, "m_g_over_m_u_reco", [dataset_axis, channel_axis, ptreco_axis, mass_ratio_axis, binning.jackknife_axis, syst_axis])
             register_hist(self.hists, "m_g_vs_m_u_reco", [dataset_axis, channel_axis, m_u_reco_5gev_axis, m_g_reco_5gev_axis, binning.jackknife_axis, syst_axis])
+            register_hist(self.hists, "m_g_over_m_u_raw_reco", [dataset_axis, channel_axis, ptreco_axis, mass_ratio_axis, binning.jackknife_axis, syst_axis])
+            register_hist(self.hists, "m_g_vs_m_u_raw_reco", [dataset_axis, channel_axis, m_u_reco_5gev_axis, m_g_reco_5gev_axis, binning.jackknife_axis, syst_axis])
 
             if self._do_gen:
                 register_hist(self.hists, "response_matrix_u", [dataset_axis, channel_axis, ptreco_axis, mreco_axis, ptgen_axis, mgen_axis, binning.jackknife_axis, syst_axis])
@@ -333,6 +341,21 @@ class QJetMassProcessor(processor.ProcessorABC):
         herwig_weight_u = get_herwig_weight_u(mode=mode).weight_array(pt, ungroomed_value)
         return herwig_weight_u, herwig_weight_g
 
+    @staticmethod
+    def _with_raw_reco_mass_fields(fatjets):
+        raw_ungroomed_mass = (1 - fatjets.rawFactor) * fatjets.mass
+        fatjets = ak.with_field(
+            fatjets,
+            raw_ungroomed_mass,
+            "mass_raw_ungroomed",
+        )
+        fatjets = ak.with_field(
+            fatjets,
+            fatjets.msoftdrop,
+            "mass_raw_groomed",
+        )
+        return fatjets
+
     def _fill_groomed_over_ungroomed_reco(
         self,
         dataset,
@@ -342,16 +365,20 @@ class QJetMassProcessor(processor.ProcessorABC):
         groomed_mass,
         weight,
         systematic,
+        mass_ratio_name="m_g_over_m_u_reco",
+        mass_2d_name="m_g_vs_m_u_reco",
         **extra_axes,
     ):
-        fill_mass_ratio = "m_g_over_m_u_reco" in self.hists
-        fill_mass_2d = "m_g_vs_m_u_reco" in self.hists
+        fill_mass_ratio = mass_ratio_name in self.hists
+        fill_mass_2d = mass_2d_name in self.hists
         if not fill_mass_ratio and not fill_mass_2d:
             return
 
         valid_mass_ratio = ak.fill_none(
             ~ak.is_none(ungroomed_mass)
             & ~ak.is_none(groomed_mass)
+            & np.isfinite(ungroomed_mass)
+            & np.isfinite(groomed_mass)
             & (ungroomed_mass > 0),
             False,
         )
@@ -365,7 +392,7 @@ class QJetMassProcessor(processor.ProcessorABC):
         if fill_mass_ratio:
             fill_hist(
                 self.hists,
-                "m_g_over_m_u_reco",
+                mass_ratio_name,
                 dataset=dataset,
                 channel=channel,
                 ptreco=ptreco[valid_mass_ratio][finite_mass_ratio],
@@ -378,7 +405,7 @@ class QJetMassProcessor(processor.ProcessorABC):
         if fill_mass_2d:
             fill_hist(
                 self.hists,
-                "m_g_vs_m_u_reco",
+                mass_2d_name,
                 dataset=dataset,
                 channel=channel,
                 m_u_reco=valid_ungroomed_mass,
@@ -797,8 +824,10 @@ class QJetMassProcessor(processor.ProcessorABC):
 
             ## Storing jec variation in the main 'Events' class
             
-            corr_jets = GetJetCorrections(events0.FatJet, events0, era, IOV, isData = not self._do_gen, mode='AK8')  ###### correcting FatJet.mass
+            fatjets_with_raw_mass = self._with_raw_reco_mass_fields(events0.FatJet)
+            corr_jets = GetJetCorrections(fatjets_with_raw_mass, events0, era, IOV, isData = not self._do_gen, mode='AK8')  ###### correcting FatJet.mass
             corr_jets = corr_jets[corr_jets.subJetIdx1 > -1]
+            del fatjets_with_raw_mass
 
             ## Storing the jec variations for the AK4 subjets
             corr_subjets = GetJetCorrections(events0.SubJet, events0, era, IOV, isData = not self._do_gen, mode = 'AK4')
@@ -1909,6 +1938,19 @@ class QJetMassProcessor(processor.ProcessorABC):
                                 systematic=syst,
                                 **mass_jk_fill,
                             )
+                            if syst == "nominal":
+                                self._fill_groomed_over_ungroomed_reco(
+                                    dataset=dataset,
+                                    channel=channel,
+                                    ptreco=ptreco,
+                                    ungroomed_mass=reco_jet_meas.mass_raw_ungroomed,
+                                    groomed_mass=reco_jet_meas.mass_raw_groomed,
+                                    weight=weights_reco,
+                                    systematic=syst,
+                                    mass_ratio_name="m_g_over_m_u_raw_reco",
+                                    mass_2d_name="m_g_vs_m_u_raw_reco",
+                                    **mass_jk_fill,
+                                )
 
                             ptreco = ptreco[~ak.is_none(mreco)]
                             mreco = mreco[~ak.is_none(mreco)]
