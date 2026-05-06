@@ -139,6 +139,8 @@ class util_binning :
         self.ptlong_axis = hist.axis.Regular(400, 0, 4000, name="pt", label=r"$H_{T}$ [GeV]")
         self.frac_axis = hist.axis.Regular(200, -3, 3, name="frac", label=r"Fraction")                
         self.mass_ratio_axis = hist.axis.Regular(200, 0, 2, name="mass_ratio", label=r"$m_{groomed}/m_{ungroomed}$")
+        self.m_u_reco_5gev_axis = hist.axis.Regular(40, 0, 200, name="m_u_reco", label=r"$m_{ungroomed,RECO}$ [GeV]", underflow=False, overflow=True)
+        self.m_g_reco_5gev_axis = hist.axis.Regular(40, 0, 200, name="m_g_reco", label=r"$m_{groomed,RECO}$ [GeV]", underflow=False, overflow=True)
         self.dr_axis = hist.axis.Regular(150, 0, 6.0, name="dr", label=r"$\Delta R$")
         self.dr_fine_axis = hist.axis.Regular(150, 0, 1.5, name="dr", label=r"$\Delta R$")
         self.dphi_axis = hist.axis.Regular(150, -2*np.pi, 2*np.pi, name="dphi", label=r"$\Delta \phi$")

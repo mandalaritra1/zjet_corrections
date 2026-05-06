@@ -126,6 +126,8 @@ class QJetMassProcessor(processor.ProcessorABC):
         pt_axis = binning.pt_axis
         frac_axis = binning.frac_axis
         mass_ratio_axis = binning.mass_ratio_axis
+        m_u_reco_5gev_axis = binning.m_u_reco_5gev_axis
+        m_g_reco_5gev_axis = binning.m_g_reco_5gev_axis
         dr_axis = binning.dr_axis
         dr_fine_axis = binning.dr_fine_axis
         dphi_axis = binning.dphi_axis    
@@ -168,6 +170,7 @@ class QJetMassProcessor(processor.ProcessorABC):
             register_hist(self.hists, "ptjet_mjet_u_reco", [dataset_axis,channel_axis, ptreco_axis, mreco_axis, syst_axis])
             register_hist(self.hists, "ptjet_mjet_g_reco", [dataset_axis,channel_axis, ptreco_axis, mreco_axis, syst_axis])
             register_hist(self.hists, "m_g_over_m_u_reco", [dataset_axis, channel_axis, ptreco_axis, mass_ratio_axis, syst_axis])
+            register_hist(self.hists, "m_g_vs_m_u_reco", [dataset_axis, channel_axis, m_u_reco_5gev_axis, m_g_reco_5gev_axis, syst_axis])
 
             if self._do_gen:
                 register_hist(self.hists, "response_matrix_u", [dataset_axis, channel_axis, ptreco_axis, mreco_axis, ptgen_axis, mgen_axis, syst_axis])
@@ -180,6 +183,7 @@ class QJetMassProcessor(processor.ProcessorABC):
             register_hist(self.hists, "ptjet_rhojet_u_reco", [dataset_axis, ptreco_axis, mreco_over_pt_axis, syst_axis ])
             register_hist(self.hists, "ptjet_rhojet_g_reco", [dataset_axis, ptreco_axis, mreco_over_pt_axis, syst_axis ])
             register_hist(self.hists, "m_g_over_m_u_reco", [dataset_axis, channel_axis, ptreco_axis, mass_ratio_axis, syst_axis])
+            register_hist(self.hists, "m_g_vs_m_u_reco", [dataset_axis, channel_axis, m_u_reco_5gev_axis, m_g_reco_5gev_axis, syst_axis])
             #register_hist(self.hists, "ptjet_rhojet_g_reco2", [dataset_axis, ptreco_axis, mreco_over_pt_axis, syst_axis ])
 
             if self._do_gen:
@@ -237,6 +241,7 @@ class QJetMassProcessor(processor.ProcessorABC):
             register_hist(self.hists, "ptjet_rhojet_u_reco", [dataset_axis, ptreco_axis, mreco_over_pt_axis, syst_axis ])
             register_hist(self.hists, "ptjet_rhojet_g_reco", [dataset_axis, ptreco_axis, mreco_over_pt_axis, syst_axis ])
             register_hist(self.hists, "m_g_over_m_u_reco", [dataset_axis, channel_axis, ptreco_axis, mass_ratio_axis, syst_axis])
+            register_hist(self.hists, "m_g_vs_m_u_reco", [dataset_axis, channel_axis, m_u_reco_5gev_axis, m_g_reco_5gev_axis, syst_axis])
             
             #register_hist(self.hists, "ht", [dataset_axis, ptlong_axis, ht_axis ])
             #register_hist(self.hists, "eta_phi_jet_reco", [dataset_axis, eta_axis, phi_axis])
@@ -273,6 +278,7 @@ class QJetMassProcessor(processor.ProcessorABC):
             register_hist(self.hists, "ptjet_mjet_u_reco", [dataset_axis, channel_axis, ptreco_axis, mreco_axis, binning.jackknife_axis, syst_axis])
             register_hist(self.hists, "ptjet_mjet_g_reco", [dataset_axis, channel_axis, ptreco_axis, mreco_axis, binning.jackknife_axis, syst_axis])
             register_hist(self.hists, "m_g_over_m_u_reco", [dataset_axis, channel_axis, ptreco_axis, mass_ratio_axis, binning.jackknife_axis, syst_axis])
+            register_hist(self.hists, "m_g_vs_m_u_reco", [dataset_axis, channel_axis, m_u_reco_5gev_axis, m_g_reco_5gev_axis, binning.jackknife_axis, syst_axis])
 
             if self._do_gen:
                 register_hist(self.hists, "response_matrix_u", [dataset_axis, channel_axis, ptreco_axis, mreco_axis, ptgen_axis, mgen_axis, binning.jackknife_axis, syst_axis])
@@ -338,7 +344,9 @@ class QJetMassProcessor(processor.ProcessorABC):
         systematic,
         **extra_axes,
     ):
-        if "m_g_over_m_u_reco" not in self.hists:
+        fill_mass_ratio = "m_g_over_m_u_reco" in self.hists
+        fill_mass_2d = "m_g_vs_m_u_reco" in self.hists
+        if not fill_mass_ratio and not fill_mass_2d:
             return
 
         valid_mass_ratio = ak.fill_none(
@@ -350,17 +358,35 @@ class QJetMassProcessor(processor.ProcessorABC):
         mass_ratio = groomed_mass[valid_mass_ratio] / ungroomed_mass[valid_mass_ratio]
         finite_mass_ratio = ak.fill_none(np.isfinite(mass_ratio), False)
 
-        fill_hist(
-            self.hists,
-            "m_g_over_m_u_reco",
-            dataset=dataset,
-            channel=channel,
-            ptreco=ptreco[valid_mass_ratio][finite_mass_ratio],
-            mass_ratio=mass_ratio[finite_mass_ratio],
-            systematic=systematic,
-            weight=weight[valid_mass_ratio][finite_mass_ratio],
-            **extra_axes,
-        )
+        valid_ungroomed_mass = ungroomed_mass[valid_mass_ratio][finite_mass_ratio]
+        valid_groomed_mass = groomed_mass[valid_mass_ratio][finite_mass_ratio]
+        valid_weight = weight[valid_mass_ratio][finite_mass_ratio]
+
+        if fill_mass_ratio:
+            fill_hist(
+                self.hists,
+                "m_g_over_m_u_reco",
+                dataset=dataset,
+                channel=channel,
+                ptreco=ptreco[valid_mass_ratio][finite_mass_ratio],
+                mass_ratio=mass_ratio[finite_mass_ratio],
+                systematic=systematic,
+                weight=valid_weight,
+                **extra_axes,
+            )
+
+        if fill_mass_2d:
+            fill_hist(
+                self.hists,
+                "m_g_vs_m_u_reco",
+                dataset=dataset,
+                channel=channel,
+                m_u_reco=valid_ungroomed_mass,
+                m_g_reco=valid_groomed_mass,
+                systematic=systematic,
+                weight=valid_weight,
+                **extra_axes,
+            )
 
     @property
     def accumulator(self):
