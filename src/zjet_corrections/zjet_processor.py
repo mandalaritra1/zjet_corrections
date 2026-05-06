@@ -125,6 +125,7 @@ class QJetMassProcessor(processor.ProcessorABC):
         zmass_axis = binning.zmass_axis
         pt_axis = binning.pt_axis
         frac_axis = binning.frac_axis
+        mass_ratio_axis = binning.mass_ratio_axis
         dr_axis = binning.dr_axis
         dr_fine_axis = binning.dr_fine_axis
         dphi_axis = binning.dphi_axis    
@@ -166,6 +167,7 @@ class QJetMassProcessor(processor.ProcessorABC):
         if self._mode == "minimal" or self._mode == "reweight_pythia"  :
             register_hist(self.hists, "ptjet_mjet_u_reco", [dataset_axis,channel_axis, ptreco_axis, mreco_axis, syst_axis])
             register_hist(self.hists, "ptjet_mjet_g_reco", [dataset_axis,channel_axis, ptreco_axis, mreco_axis, syst_axis])
+            register_hist(self.hists, "m_g_over_m_u_reco", [dataset_axis, channel_axis, ptreco_axis, mass_ratio_axis, syst_axis])
 
             if self._do_gen:
                 register_hist(self.hists, "response_matrix_u", [dataset_axis, channel_axis, ptreco_axis, mreco_axis, ptgen_axis, mgen_axis, syst_axis])
@@ -177,6 +179,7 @@ class QJetMassProcessor(processor.ProcessorABC):
         if self._mode == "minimal_rho" or self._mode == "reweight_pythia_rho":
             register_hist(self.hists, "ptjet_rhojet_u_reco", [dataset_axis, ptreco_axis, mreco_over_pt_axis, syst_axis ])
             register_hist(self.hists, "ptjet_rhojet_g_reco", [dataset_axis, ptreco_axis, mreco_over_pt_axis, syst_axis ])
+            register_hist(self.hists, "m_g_over_m_u_reco", [dataset_axis, channel_axis, ptreco_axis, mass_ratio_axis, syst_axis])
             #register_hist(self.hists, "ptjet_rhojet_g_reco2", [dataset_axis, ptreco_axis, mreco_over_pt_axis, syst_axis ])
 
             if self._do_gen:
@@ -233,6 +236,7 @@ class QJetMassProcessor(processor.ProcessorABC):
 
             register_hist(self.hists, "ptjet_rhojet_u_reco", [dataset_axis, ptreco_axis, mreco_over_pt_axis, syst_axis ])
             register_hist(self.hists, "ptjet_rhojet_g_reco", [dataset_axis, ptreco_axis, mreco_over_pt_axis, syst_axis ])
+            register_hist(self.hists, "m_g_over_m_u_reco", [dataset_axis, channel_axis, ptreco_axis, mass_ratio_axis, syst_axis])
             
             #register_hist(self.hists, "ht", [dataset_axis, ptlong_axis, ht_axis ])
             #register_hist(self.hists, "eta_phi_jet_reco", [dataset_axis, eta_axis, phi_axis])
@@ -268,6 +272,7 @@ class QJetMassProcessor(processor.ProcessorABC):
         if self._mode == "mass_jk":
             register_hist(self.hists, "ptjet_mjet_u_reco", [dataset_axis, channel_axis, ptreco_axis, mreco_axis, binning.jackknife_axis, syst_axis])
             register_hist(self.hists, "ptjet_mjet_g_reco", [dataset_axis, channel_axis, ptreco_axis, mreco_axis, binning.jackknife_axis, syst_axis])
+            register_hist(self.hists, "m_g_over_m_u_reco", [dataset_axis, channel_axis, ptreco_axis, mass_ratio_axis, binning.jackknife_axis, syst_axis])
 
             if self._do_gen:
                 register_hist(self.hists, "response_matrix_u", [dataset_axis, channel_axis, ptreco_axis, mreco_axis, ptgen_axis, mgen_axis, binning.jackknife_axis, syst_axis])
@@ -321,6 +326,41 @@ class QJetMassProcessor(processor.ProcessorABC):
         herwig_weight_g = get_herwig_weight_g(mode=mode).weight_array(pt, groomed_value)
         herwig_weight_u = get_herwig_weight_u(mode=mode).weight_array(pt, ungroomed_value)
         return herwig_weight_u, herwig_weight_g
+
+    def _fill_groomed_over_ungroomed_reco(
+        self,
+        dataset,
+        channel,
+        ptreco,
+        ungroomed_mass,
+        groomed_mass,
+        weight,
+        systematic,
+        **extra_axes,
+    ):
+        if "m_g_over_m_u_reco" not in self.hists:
+            return
+
+        valid_mass_ratio = ak.fill_none(
+            ~ak.is_none(ungroomed_mass)
+            & ~ak.is_none(groomed_mass)
+            & (ungroomed_mass > 0),
+            False,
+        )
+        mass_ratio = groomed_mass[valid_mass_ratio] / ungroomed_mass[valid_mass_ratio]
+        finite_mass_ratio = ak.fill_none(np.isfinite(mass_ratio), False)
+
+        fill_hist(
+            self.hists,
+            "m_g_over_m_u_reco",
+            dataset=dataset,
+            channel=channel,
+            ptreco=ptreco[valid_mass_ratio][finite_mass_ratio],
+            mass_ratio=mass_ratio[finite_mass_ratio],
+            systematic=systematic,
+            weight=weight[valid_mass_ratio][finite_mass_ratio],
+            **extra_axes,
+        )
 
     @property
     def accumulator(self):
@@ -1833,6 +1873,17 @@ class QJetMassProcessor(processor.ProcessorABC):
                             mreco_g = reco_jet_meas.msoftdrop
                             #mreco_g2 = reco_jet_meas.msoftdrop_orig
 
+                            self._fill_groomed_over_ungroomed_reco(
+                                dataset=dataset,
+                                channel=channel,
+                                ptreco=ptreco,
+                                ungroomed_mass=mreco,
+                                groomed_mass=mreco_g,
+                                weight=weights_reco,
+                                systematic=syst,
+                                **mass_jk_fill,
+                            )
+
                             ptreco = ptreco[~ak.is_none(mreco)]
                             mreco = mreco[~ak.is_none(mreco)]
                             mreco_g = mreco_g[~ak.is_none(mreco_g)]
@@ -2101,6 +2152,17 @@ class QJetMassProcessor(processor.ProcessorABC):
                         ptreco_g = reco_jet_meas.pt
                         mreco = reco_jet_meas.mass
                         mreco_g = reco_jet_meas.msoftdrop
+
+                        self._fill_groomed_over_ungroomed_reco(
+                            dataset=dataset,
+                            channel=channel,
+                            ptreco=ptreco,
+                            ungroomed_mass=mreco,
+                            groomed_mass=mreco_g,
+                            weight=weights_reco,
+                            systematic=jet_syst,
+                            **mass_jk_fill,
+                        )
 
                         ptreco = ptreco[~ak.is_none(mreco)]
                         mreco = mreco[~ak.is_none(mreco)]
