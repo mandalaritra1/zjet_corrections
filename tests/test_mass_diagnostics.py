@@ -25,6 +25,7 @@ def test_reco_mass_diagnostic_fields_keep_nanoaod_and_raw_ungroomed_values():
     assert ak.to_list(out.mass_nanoaod) == [[100.0, 50.0], [40.0]]
     assert ak.to_list(out.msoftdrop_nanoaod) == [[80.0, 55.0], [30.0]]
     assert ak.to_list(out.mass_raw_diagnostic) == [[90.0, 40.0], [40.0]]
+    assert ak.to_list(out.msoftdrop_raw_fatjet_diagnostic) == [[72.0, 44.0], [30.0]]
 
 
 def test_raw_softdrop_mass_is_built_from_raw_subjets():
@@ -107,9 +108,13 @@ def test_mass_diagnostic_ntuple_mode_books_only_ntuple_and_metadata():
     assert set(proc.hists) == {"reco_jet_ntuple", "sumw", "nev", "cutflow"}
     assert proc.jet_systematics == ["nominal"]
     assert proc.systematics == ["nominal"]
-    assert {"mass_raw", "msoftdrop_raw", "mass_nanoaod", "msoftdrop_nanoaod"} <= set(
-        proc.hists["reco_jet_ntuple"]
-    )
+    assert {
+        "mass_raw",
+        "msoftdrop_raw",
+        "msoftdrop_raw_fatjet",
+        "mass_nanoaod",
+        "msoftdrop_nanoaod",
+    } <= set(proc.hists["reco_jet_ntuple"])
 
 
 def test_mass_diagnostic_ntuple_postprocess_skips_ntuple_accumulator():

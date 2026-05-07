@@ -364,6 +364,7 @@ class QJetMassProcessor(processor.ProcessorABC):
             "pt_raw",
             "mass_raw",
             "msoftdrop_raw",
+            "msoftdrop_raw_fatjet",
         ]
         uint64_columns = ["event"]
         uint32_columns = ["run", "luminosityBlock"]
@@ -433,6 +434,9 @@ class QJetMassProcessor(processor.ProcessorABC):
         ntuple["msoftdrop_raw"] += processor.column_accumulator(
             self._to_numpy_column(reco_jet.msoftdrop_raw_diagnostic)
         )
+        ntuple["msoftdrop_raw_fatjet"] += processor.column_accumulator(
+            self._to_numpy_column(reco_jet.msoftdrop_raw_fatjet_diagnostic)
+        )
 
     @staticmethod
     def _with_reco_mass_diagnostic_fields(fatjets):
@@ -460,6 +464,11 @@ class QJetMassProcessor(processor.ProcessorABC):
             fatjets,
             (1 - fatjets.rawFactor) * fatjets.mass,
             "mass_raw_diagnostic",
+        )
+        fatjets = ak.with_field(
+            fatjets,
+            (1 - fatjets.rawFactor) * fatjets.msoftdrop,
+            "msoftdrop_raw_fatjet_diagnostic",
         )
         return fatjets
 
