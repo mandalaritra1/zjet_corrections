@@ -513,6 +513,26 @@ class QJetMassProcessor(processor.ProcessorABC):
             "msoftdrop_raw_diagnostic",
         )
 
+    @staticmethod
+    def _with_ak8_scaled_softdrop_mass(fatjets, raw_reference=None):
+        raw_source = fatjets if raw_reference is None else raw_reference
+        raw_mass = raw_source.mass_raw_diagnostic
+        raw_softdrop_mass = raw_source.msoftdrop_raw_diagnostic
+        corrected_mass = fatjets.mass
+        valid = (
+            ak.fill_none(np.isfinite(raw_mass), False)
+            & ak.fill_none(np.isfinite(raw_softdrop_mass), False)
+            & ak.fill_none(np.isfinite(corrected_mass), False)
+            & ak.fill_none(raw_mass > 0, False)
+        )
+        safe_raw_mass = ak.where(valid, raw_mass, 1.0)
+        scaled_softdrop_mass = ak.where(
+            valid,
+            raw_softdrop_mass * corrected_mass / safe_raw_mass,
+            np.nan,
+        )
+        return ak.with_field(fatjets, scaled_softdrop_mass, "msoftdrop")
+
     def _fill_groomed_over_ungroomed_reco(
         self,
         dataset,
@@ -985,12 +1005,8 @@ class QJetMassProcessor(processor.ProcessorABC):
             corr_jets = GetJetCorrections(fatjets_with_mass_diagnostics, events0, era, IOV, isData = not self._do_gen, mode='AK8')  ###### correcting FatJet.mass
             corr_jets = corr_jets[(corr_jets.subJetIdx1 > -1) & (corr_jets.subJetIdx2 > -1)]
             corr_jets = self._with_raw_softdrop_mass_from_subjets(corr_jets, events0.SubJet)
+            corr_jets = self._with_ak8_scaled_softdrop_mass(corr_jets)
             del fatjets_with_mass_diagnostics
-
-            ## Storing the jec variations for the AK4 subjets
-            corr_subjets = GetJetCorrections(events0.SubJet, events0, era, IOV, isData = not self._do_gen, mode = 'AK4')
-            #corr_jets['msoftdrop_orig'] = corr_jets.msoftdrop
-            corr_jets['msoftdrop'] =   (corr_subjets[corr_jets.subJetIdx1] + corr_subjets[corr_jets.subJetIdx2]).mass 
 
             self.logging.debug("Jet Corrections Applied")
             self.logging.debug(f"Available Jet systematics {self.jet_systematics}")
@@ -1025,14 +1041,12 @@ class QJetMassProcessor(processor.ProcessorABC):
                         events_j = ak.with_field(events0, corr_jets , "FatJet")
                     self.logging.debug(f"FatJet pt after correction: {events_j[ak.num(events_j.FatJet, axis = 1) > 0].FatJet.pt}" )
                 elif jet_syst == "JERUp":
-                    corr_jets_obj = corr_jets.JER.up
-                    corr_jets_obj['msoftdrop'] = (corr_subjets.JER.up[corr_jets.subJetIdx1] + corr_subjets.JER.up[corr_jets.subJetIdx2]).mass
+                    corr_jets_obj = self._with_ak8_scaled_softdrop_mass(corr_jets.JER.up, corr_jets)
                     
                     events_j = ak.with_field(events0, jmrsf(IOV, jmssf(IOV,corr_jets_obj)), "FatJet")
                     del corr_jets_obj
                 elif jet_syst == "JERDown":
-                    corr_jets_obj = corr_jets.JER.up
-                    corr_jets_obj['msoftdrop'] = (corr_subjets.JER.down[corr_jets.subJetIdx1] + corr_subjets.JER.down[corr_jets.subJetIdx2]).mass
+                    corr_jets_obj = self._with_ak8_scaled_softdrop_mass(corr_jets.JER.down, corr_jets)
                     
                     events_j = ak.with_field(events0, jmrsf(IOV, jmssf(IOV,corr_jets_obj)), "FatJet")
                     del corr_jets_obj
@@ -1049,16 +1063,14 @@ class QJetMassProcessor(processor.ProcessorABC):
                     #print(jet_syst)
                     field = jet_syst[:-2]
                     #print(field)
-                    corr_jets_obj = corr_jets[field].up
-                    corr_jets_obj['msoftdrop'] = (corr_subjets[field].up[corr_jets.subJetIdx1] + corr_subjets[field].up[corr_jets.subJetIdx2]).mass
+                    corr_jets_obj = self._with_ak8_scaled_softdrop_mass(corr_jets[field].up, corr_jets)
                     
                     events_j = ak.with_field(events0, jmrsf(IOV, jmssf(IOV,corr_jets_obj)), "FatJet")
                     del corr_jets_obj
                     
                 elif (jet_syst[-4:]=="Down" and "JES" in jet_syst):
                     field = jet_syst[:-4]
-                    corr_jets_obj = corr_jets[field].down
-                    corr_jets_obj['msoftdrop'] = (corr_subjets[field].down[corr_jets.subJetIdx1] + corr_subjets[field].down[corr_jets.subJetIdx2]).mass
+                    corr_jets_obj = self._with_ak8_scaled_softdrop_mass(corr_jets[field].down, corr_jets)
                     
                     events_j = ak.with_field(events0, jmrsf(IOV, jmssf(IOV,corr_jets_obj)), "FatJet")
                     del corr_jets_obj

@@ -1,3 +1,4 @@
+import inspect
 import pathlib
 import sys
 
@@ -58,6 +59,70 @@ def test_raw_softdrop_mass_is_built_from_raw_subjets():
 
     expected_mass = np.sqrt((np.sqrt(45.0**2 + 9.0**2) + np.sqrt(40.0**2 + 16.0**2)) ** 2 - 85.0**2)
     assert np.isclose(ak.to_numpy(out.msoftdrop_raw_diagnostic)[0, 0], expected_mass)
+
+
+def test_ak8_scaled_softdrop_mass_uses_ungroomed_mass_scale():
+    fatjets = ak.Array(
+        [
+            [
+                {"mass": 100.0, "mass_raw_diagnostic": 80.0, "msoftdrop_raw_diagnostic": 40.0},
+                {"mass": 120.0, "mass_raw_diagnostic": 0.0, "msoftdrop_raw_diagnostic": 30.0},
+                {"mass": np.inf, "mass_raw_diagnostic": 60.0, "msoftdrop_raw_diagnostic": 30.0},
+            ],
+            [
+                {"mass": 45.0, "mass_raw_diagnostic": 30.0, "msoftdrop_raw_diagnostic": None},
+            ],
+        ]
+    )
+
+    out = QJetMassProcessor._with_ak8_scaled_softdrop_mass(fatjets)
+    values = ak.to_numpy(ak.flatten(out.msoftdrop, axis=None))
+
+    assert np.isclose(values[0], 50.0)
+    assert np.isnan(values[1])
+    assert np.isnan(values[2])
+    assert np.isnan(values[3])
+
+
+def test_ak8_scaled_softdrop_mass_preserves_raw_groomed_ungroomed_ratio():
+    fatjets = ak.Array(
+        [
+            [
+                {"mass": 100.0, "mass_raw_diagnostic": 80.0, "msoftdrop_raw_diagnostic": 40.0},
+                {"mass": 60.0, "mass_raw_diagnostic": 40.0, "msoftdrop_raw_diagnostic": 20.0},
+            ]
+        ]
+    )
+
+    out = QJetMassProcessor._with_ak8_scaled_softdrop_mass(fatjets)
+    corrected_ratio = ak.to_numpy(ak.flatten(out.msoftdrop / out.mass, axis=None))
+    raw_ratio = ak.to_numpy(
+        ak.flatten(out.msoftdrop_raw_diagnostic / out.mass_raw_diagnostic, axis=None)
+    )
+
+    assert np.allclose(corrected_ratio, raw_ratio)
+
+
+def test_ak8_scaled_softdrop_mass_can_use_nominal_raw_reference():
+    varied_fatjets = ak.Array([[{"mass": 110.0}]])
+    nominal_fatjets = ak.Array(
+        [[{"mass_raw_diagnostic": 80.0, "msoftdrop_raw_diagnostic": 40.0}]]
+    )
+
+    out = QJetMassProcessor._with_ak8_scaled_softdrop_mass(varied_fatjets, nominal_fatjets)
+
+    assert np.isclose(ak.to_numpy(out.msoftdrop)[0, 0], 55.0)
+
+
+def test_jer_down_uses_down_varied_ak8_mass_scale():
+    source = inspect.getsource(QJetMassProcessor.process)
+    jer_down_block = source.split('elif jet_syst == "JERDown":', 1)[1].split(
+        'elif jet_syst == "JMSUp":',
+        1,
+    )[0]
+
+    assert "corr_jets.JER.down" in jer_down_block
+    assert "corr_jets.JER.up" not in jer_down_block
 
 
 def test_raw_mass_diagnostics_registered_for_mass_modes():
