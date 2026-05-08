@@ -14,17 +14,19 @@ def test_reco_mass_diagnostic_fields_keep_nanoaod_and_raw_ungroomed_values():
     fatjets = ak.Array(
         [
             [
-                {"mass": 100.0, "msoftdrop": 80.0, "rawFactor": 0.10},
-                {"mass": 50.0, "msoftdrop": 55.0, "rawFactor": 0.20},
+                {"pt": 200.0, "mass": 100.0, "msoftdrop": 80.0, "rawFactor": 0.10},
+                {"pt": 120.0, "mass": 50.0, "msoftdrop": 55.0, "rawFactor": 0.20},
             ],
-            [{"mass": 40.0, "msoftdrop": 30.0, "rawFactor": 0.00}],
+            [{"pt": 90.0, "mass": 40.0, "msoftdrop": 30.0, "rawFactor": 0.00}],
         ]
     )
 
     out = QJetMassProcessor._with_reco_mass_diagnostic_fields(fatjets)
 
+    assert ak.to_list(out.pt_nanoaod) == [[200.0, 120.0], [90.0]]
     assert ak.to_list(out.mass_nanoaod) == [[100.0, 50.0], [40.0]]
     assert ak.to_list(out.msoftdrop_nanoaod) == [[80.0, 55.0], [30.0]]
+    assert ak.to_list(out.pt_raw_diagnostic) == [[180.0, 96.0], [90.0]]
     assert ak.to_list(out.mass_raw_diagnostic) == [[90.0, 40.0], [40.0]]
     assert ak.to_list(out.msoftdrop_raw_fatjet_diagnostic) == [[72.0, 44.0], [30.0]]
 
