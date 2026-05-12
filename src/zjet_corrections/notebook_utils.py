@@ -44,7 +44,12 @@ MASS_MODE_OPTIONS = [
 ]
 MODE_OPTIONS = RHO_MODE_OPTIONS + MASS_MODE_OPTIONS
 SYSTEMATIC_PROFILE_OPTIONS = ["all_syst", "minimal_syst", "no_syst"]
-EXECUTOR_MODE_OPTIONS = ["futures", "dask-local", "dask-casa"]
+EXECUTOR_MODE_OPTIONS = [
+    "futures",
+    "dask-local",
+    "dask-casa",
+    "dask-lpc",
+]
 
 _MASS_MODE_ALIASES = {
     "minimal",
@@ -369,19 +374,45 @@ def ensure_client(
         print("Created CoffeaCasaCluster client.")
         return client
 
+    if resolved_mode == "dask-lpc":
+        try:
+            from lpcjobqueue import LPCCondorCluster
+        except ImportError as exc:
+            raise ImportError(
+                "executor_mode='dask-lpc' requires the lpcjobqueue package. "
+                "Use this mode from an LPC environment, or choose "
+                "'dask-casa', 'dask-local', or 'futures'."
+            ) from exc
+
+        zip_path = make_package_archive()
+        cluster = LPCCondorCluster(
+            memory="6 GiB",
+            transfer_input_files=[str(zip_path)],
+            scheduler_options={"dashboard_address": ":8787"},
+        )
+        cluster.adapt(minimum=1, maximum=100)
+        client = Client(cluster)
+        print("Created LPCCondorCluster client.")
+        return client
+
     raise ValueError(f"Unsupported executor_mode '{resolved_mode}'")
 
 
-def upload_package_if_casa(client, casa: bool, package_dir: Path | None = None):
-    if not casa or client is None:
-        return
-
+def make_package_archive(package_dir: Path | None = None) -> Path:
     pkg_dir = package_dir or Path(__file__).resolve().parent
     zip_path = Path("/tmp/zjet_corrections.zip")
     if zip_path.exists():
         zip_path.unlink()
 
     shutil.make_archive(zip_path.with_suffix(""), "zip", pkg_dir.parent, pkg_dir.name)
+    return zip_path
+
+
+def upload_package_if_casa(client, casa: bool, package_dir: Path | None = None):
+    if client is None:
+        return
+
+    zip_path = make_package_archive(package_dir=package_dir)
     client.upload_file(str(zip_path))
     print("Uploaded zjet_corrections.zip to workers.")
 
