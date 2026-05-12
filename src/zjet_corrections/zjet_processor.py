@@ -365,9 +365,17 @@ class QJetMassProcessor(processor.ProcessorABC):
             "mass_raw",
             "msoftdrop_raw",
             "msoftdrop_raw_fatjet",
+            "gen_pt",
+            "gen_eta",
+            "gen_phi",
+            "gen_mass",
+            "gen_rapidity",
+            "gen_msoftdrop",
+            "reco_gen_dr",
         ]
         uint64_columns = ["event"]
         uint32_columns = ["run", "luminosityBlock"]
+        uint8_columns = ["has_gen_match", "passes_gen_selection", "passes_both"]
         object_columns = ["dataset", "channel", "systematic"]
 
         columns = {}
@@ -377,6 +385,8 @@ class QJetMassProcessor(processor.ProcessorABC):
             columns[name] = processor.column_accumulator(np.array([], dtype=np.uint64))
         for name in uint32_columns:
             columns[name] = processor.column_accumulator(np.array([], dtype=np.uint32))
+        for name in uint8_columns:
+            columns[name] = processor.column_accumulator(np.array([], dtype=np.uint8))
         for name in object_columns:
             columns[name] = processor.column_accumulator(np.array([], dtype=object))
 
@@ -388,6 +398,12 @@ class QJetMassProcessor(processor.ProcessorABC):
             return np.asarray(values, dtype=dtype)
         return np.asarray(ak.to_numpy(ak.fill_none(values, np.nan)), dtype=dtype)
 
+    @staticmethod
+    def _to_numpy_flag_column(values):
+        if isinstance(values, np.ndarray):
+            return np.asarray(values, dtype=np.uint8)
+        return np.asarray(ak.to_numpy(ak.fill_none(values, False)), dtype=np.uint8)
+
     def _fill_reco_jet_ntuple(
         self,
         dataset,
@@ -396,6 +412,11 @@ class QJetMassProcessor(processor.ProcessorABC):
         events,
         reco_jet,
         weight,
+        gen_jet=None,
+        groomed_gen_jet=None,
+        has_gen_match=None,
+        passes_gen_selection=None,
+        passes_both=None,
     ):
         if "reco_jet_ntuple" not in self.hists:
             return
@@ -437,6 +458,42 @@ class QJetMassProcessor(processor.ProcessorABC):
         ntuple["msoftdrop_raw_fatjet"] += processor.column_accumulator(
             self._to_numpy_column(reco_jet.msoftdrop_raw_fatjet_diagnostic)
         )
+
+        if gen_jet is None:
+            gen_pt = gen_eta = gen_phi = gen_mass = gen_rapidity = np.full(nrows, np.nan)
+            reco_gen_dr = np.full(nrows, np.nan)
+        else:
+            gen_pt = self._to_numpy_column(gen_jet.pt)
+            gen_eta = self._to_numpy_column(gen_jet.eta)
+            gen_phi = self._to_numpy_column(gen_jet.phi)
+            gen_mass = self._to_numpy_column(gen_jet.mass)
+            gen_rapidity = self._to_numpy_column(gen_jet.rapidity)
+            reco_gen_dr = self._to_numpy_column(reco_jet.delta_r(gen_jet))
+
+        if groomed_gen_jet is None:
+            gen_msoftdrop = np.full(nrows, np.nan)
+        else:
+            gen_msoftdrop = self._to_numpy_column(groomed_gen_jet.mass)
+
+        ntuple["gen_pt"] += processor.column_accumulator(gen_pt)
+        ntuple["gen_eta"] += processor.column_accumulator(gen_eta)
+        ntuple["gen_phi"] += processor.column_accumulator(gen_phi)
+        ntuple["gen_mass"] += processor.column_accumulator(gen_mass)
+        ntuple["gen_rapidity"] += processor.column_accumulator(gen_rapidity)
+        ntuple["gen_msoftdrop"] += processor.column_accumulator(gen_msoftdrop)
+        ntuple["reco_gen_dr"] += processor.column_accumulator(reco_gen_dr)
+
+        flag_defaults = {
+            "has_gen_match": has_gen_match,
+            "passes_gen_selection": passes_gen_selection,
+            "passes_both": passes_both,
+        }
+        for name, values in flag_defaults.items():
+            if values is None:
+                column = np.zeros(nrows, dtype=np.uint8)
+            else:
+                column = self._to_numpy_flag_column(values)
+            ntuple[name] += processor.column_accumulator(column)
 
     @staticmethod
     def _with_reco_mass_diagnostic_fields(fatjets):
@@ -2128,6 +2185,11 @@ class QJetMassProcessor(processor.ProcessorABC):
                                     events=events_j[sel_reco],
                                     reco_jet=reco_jet_meas,
                                     weight=weights_reco,
+                                    gen_jet=gen_jet[sel_reco] if self._do_gen else None,
+                                    groomed_gen_jet=groomed_gen_jet[sel_reco] if self._do_gen else None,
+                                    has_gen_match=is_matched_reco[sel_reco] if self._do_gen else None,
+                                    passes_gen_selection=allsel_gen[sel_reco] if self._do_gen else None,
+                                    passes_both=(sel_reco & allsel_gen)[sel_reco] if self._do_gen else None,
                                 )
 
                             ptreco = ptreco[~ak.is_none(mreco)]
