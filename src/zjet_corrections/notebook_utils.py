@@ -50,6 +50,12 @@ EXECUTOR_MODE_OPTIONS = [
     "dask-casa",
     "dask-lpc",
 ]
+REDIRECTOR_PREPENDS = {
+    "local": "",
+    "lpc": "root://cmsxrootd.fnal.gov/",
+    "casa": "root://xcache/",
+}
+REDIRECTOR_OPTIONS = list(REDIRECTOR_PREPENDS)
 
 _MASS_MODE_ALIASES = {
     "minimal",
@@ -78,8 +84,71 @@ ST_FILES = [
     "ST_t-channel_top_4f_InclusiveDecays_UL18NanoAODv9.txt",
 ]
 
+
+def resolve_redirector_prepend(redirector: str) -> str:
+    if redirector not in REDIRECTOR_PREPENDS:
+        raise ValueError(
+            f"Unknown redirector '{redirector}'. "
+            f"Choose from {', '.join(REDIRECTOR_OPTIONS)}."
+        )
+    return REDIRECTOR_PREPENDS[redirector]
+
+
+def infer_redirector_from_prepend(prepend: str) -> str:
+    for name, value in REDIRECTOR_PREPENDS.items():
+        if prepend == value:
+            return name
+    return "casa"
+
 MINIMAL_JET_SYSTEMATICS = ["nominal", "JERUp", "JERDown"]
 NO_SYST_SYSTEMATICS = ["nominal"]
+
+
+ANALYSIS_CONFIG_DEFAULTS = {
+    "casa": True,
+    "test": False,
+    "useDefault": False,
+    "executor_mode": "futures",
+    "mode": "validation",
+    "era": "2016",
+    "dataset": "pythia",
+    "chunksize": 50000,
+    "chunksize_test": 200000,
+    "group_mode": "all_in_one",
+    "redirector": "casa",
+    "prependstr": "root://xcache/",
+    "systematic_profile": "all_syst",
+}
+
+
+def validate_analysis_config(cfg: dict) -> dict:
+    """Merge user config onto defaults and normalize stale option values.
+
+    Mirrors the shape-checks the notebook performs after loading
+    `.analysis_widget_config.json`: unknown enum values fall back to the
+    default for that key, and the redirector is re-derived from prependstr
+    when missing or stale.
+    """
+    merged = ANALYSIS_CONFIG_DEFAULTS.copy()
+    merged.update(cfg or {})
+
+    if merged["dataset"] not in DATASET_OPTIONS:
+        merged["dataset"] = ANALYSIS_CONFIG_DEFAULTS["dataset"]
+    if merged["era"] not in ERA_OPTIONS:
+        merged["era"] = ANALYSIS_CONFIG_DEFAULTS["era"]
+    if merged["mode"] not in MODE_OPTIONS:
+        merged["mode"] = ANALYSIS_CONFIG_DEFAULTS["mode"]
+    if merged.get("systematic_profile") not in SYSTEMATIC_PROFILE_OPTIONS:
+        merged["systematic_profile"] = ANALYSIS_CONFIG_DEFAULTS["systematic_profile"]
+    if merged.get("executor_mode") not in EXECUTOR_MODE_OPTIONS:
+        merged["executor_mode"] = ANALYSIS_CONFIG_DEFAULTS["executor_mode"]
+    if merged.get("redirector") not in REDIRECTOR_OPTIONS:
+        merged["redirector"] = infer_redirector_from_prepend(
+            merged.get("prependstr", ANALYSIS_CONFIG_DEFAULTS["prependstr"])
+        )
+
+    merged["prependstr"] = resolve_redirector_prepend(merged["redirector"])
+    return merged
 
 
 @dataclass(frozen=True)

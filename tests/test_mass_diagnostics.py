@@ -4,6 +4,7 @@ import sys
 
 import awkward as ak
 import numpy as np
+from coffea import processor
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
@@ -195,6 +196,43 @@ def test_mass_diagnostic_ntuple_postprocess_skips_ntuple_accumulator():
     out = proc.postprocess(proc.hists)
 
     assert out["reco_jet_ntuple"] is proc.hists["reco_jet_ntuple"]
+
+
+def test_mass_diagnostic_ntuple_postprocess_scales_mc_weights():
+    proc = QJetMassProcessor(
+        do_gen=True,
+        mode="mass_diagnostic_ntuple",
+        jet_systematics=["nominal"],
+        systematics=["nominal"],
+    )
+    dataset = "pythia_UL16NanoAODv9_HT-100to200"
+    ntuple = proc.hists["reco_jet_ntuple"]
+    ntuple["dataset"] += processor.column_accumulator(np.array([dataset, dataset], dtype=object))
+    ntuple["weight"] += processor.column_accumulator(np.array([1.0, 2.0], dtype=np.float64))
+    proc.hists["sumw"][dataset] = 1000.0
+
+    out = proc.postprocess(proc.hists)
+
+    expected_scale = 139.2 * 19.52 * 1000.0 * 1.1297638966 / 1000.0
+    assert np.allclose(out["reco_jet_ntuple"]["weight"].value, [expected_scale, 2.0 * expected_scale])
+
+
+def test_mass_diagnostic_ntuple_postprocess_keeps_data_weights_unscaled():
+    proc = QJetMassProcessor(
+        do_gen=False,
+        mode="mass_diagnostic_ntuple",
+        jet_systematics=["nominal"],
+        systematics=["nominal"],
+    )
+    ntuple = proc.hists["reco_jet_ntuple"]
+    ntuple["dataset"] += processor.column_accumulator(
+        np.array(["SingleMuon_UL2016", "SingleElectron_UL2016"], dtype=object)
+    )
+    ntuple["weight"] += processor.column_accumulator(np.array([1.0, 1.0], dtype=np.float64))
+
+    out = proc.postprocess(proc.hists)
+
+    assert np.allclose(out["reco_jet_ntuple"]["weight"].value, [1.0, 1.0])
 
 
 def test_raw_mass_ratio_fill_rejects_none_zero_and_nonfinite_values():

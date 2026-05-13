@@ -76,3 +76,5 @@ tests/.analysis_widget_config.json
 .codex
 .python-version
 .analysis_widget_config.json
+outputs/
+.claude/

@@ -496,6 +496,110 @@ class QJetMassProcessor(processor.ProcessorABC):
             ntuple[name] += processor.column_accumulator(column)
 
     @staticmethod
+    def _postprocess_scale_for_dataset(dataset, sumw):
+        dataset = str(dataset)
+        lumi_db = {
+            "UL16NanoAODv9": 19.52,
+            "UL16NanoAODAPVv9": 16.81,
+            "UL17NanoAODv9": 41.48,
+            "UL18NanoAODv9": 59.83,
+        }
+
+        if dataset.startswith(("SingleMuon", "EGamma", "SingleElectron")):
+            return 1.0
+
+        def scale_from(xs, iov):
+            sw = float(sumw[dataset])
+            if sw == 0.0:
+                return None
+            return (xs * lumi_db[iov] * 1000.0) / sw
+
+        if "pythia" in dataset:
+            xsdb = {
+                "HT-70to100": 140.0,
+                "HT-100to200": 139.2,
+                "HT-200to400": 38.4,
+                "HT-400to600": 5.174,
+                "HT-600to800": 1.258,
+                "HT-800to1200": 0.5598,
+                "HT-1200to2500": 0.1305,
+                "HT-2500toInf": 0.002997,
+            }
+            ht_bin = dataset.split("_")[-1]
+            iov = dataset.split("_")[-2]
+            xs = xsdb[ht_bin]
+            scale = scale_from(xs, iov)
+            if scale is None:
+                return None
+            return scale * 1.1297638966
+
+        if "herwig" in dataset:
+            iov = dataset.split("_")[-2]
+            return scale_from(5.036, iov)
+
+        if "powheg" in dataset:
+            iov = dataset.split("_")[-2]
+            return scale_from(1976.0, iov)
+
+        if ("st" in dataset) or ("ST" in dataset):
+            xsdb = {
+                "st_tW_antitop": 34.97,
+                "st_tW_top": 34.91,
+                "ST_t-channel_antitop": 67.93,
+                "ST_t-channel_top": 69.09,
+            }
+            if dataset.startswith("st_tW_antitop"):
+                xs = xsdb["st_tW_antitop"]
+            elif dataset.startswith("st_tW_top"):
+                xs = xsdb["st_tW_top"]
+            elif dataset.startswith("ST_t-channel_antitop"):
+                xs = xsdb["ST_t-channel_antitop"]
+            else:
+                xs = xsdb["ST_t-channel_top"]
+            iov = dataset.split("_")[-1]
+            return scale_from(xs, iov)
+
+        if "ww" in dataset:
+            iov = dataset.split("_")[-1]
+            return scale_from(75.95, iov)
+
+        if "wz" in dataset:
+            iov = dataset.split("_")[-1]
+            return scale_from(27.6, iov)
+
+        if "zz" in dataset:
+            iov = dataset.split("_")[-1]
+            return scale_from(12.17, iov)
+
+        if "ttjets" in dataset:
+            iov = dataset.split("_")[-1]
+            return scale_from(471.7, iov)
+
+        return None
+
+    def _scale_reco_jet_ntuple_weights(self, ntuple, sumw):
+        if "weight" not in ntuple or "dataset" not in ntuple:
+            return
+
+        weights = np.asarray(ntuple["weight"].value, dtype=np.float64)
+        if len(weights) == 0:
+            return
+
+        datasets = np.asarray(ntuple["dataset"].value, dtype=object)
+        scaled_weights = weights.copy()
+        for dataset in np.unique(datasets):
+            scale = self._postprocess_scale_for_dataset(dataset, sumw)
+            if scale is None:
+                self.logging.info(f"Ntuple dataset {dataset} is not listed, no scaling done")
+                continue
+            if scale == 1.0:
+                continue
+            scaled_weights[datasets == dataset] *= scale
+            self.logging.info(f"Scaled reco_jet_ntuple weights for dataset {dataset} by {scale:.6f}")
+
+        ntuple["weight"] = processor.column_accumulator(scaled_weights)
+
+    @staticmethod
     def _with_reco_mass_diagnostic_fields(fatjets):
         fatjets = ak.with_field(
             fatjets,
@@ -2714,6 +2818,9 @@ class QJetMassProcessor(processor.ProcessorABC):
         for hname in hname_list:
             
             h = accumulator[hname]
+            if hname == "reco_jet_ntuple":
+                self._scale_reco_jet_ntuple_weights(h, sumw)
+                continue
             if not hasattr(h, "axes") or "dataset" not in h.axes.name:
                 continue
             for i,ds in enumerate(h.axes['dataset']):

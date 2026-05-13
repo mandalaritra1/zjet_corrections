@@ -24,6 +24,9 @@ dask = [
 test = [
     "pytest>=8",
 ]
+app = [
+    "streamlit>=1.30",
+]
 
 [tool.setuptools.package-data]
 "zjet_corrections" = ["corrections/**/*"]
