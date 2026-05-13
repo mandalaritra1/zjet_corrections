@@ -15,6 +15,7 @@ import re
 import signal
 import struct
 import subprocess
+import sys
 import termios
 import threading
 import time
@@ -126,6 +127,50 @@ def stop_run(proc: subprocess.Popen, pgid: int, *, timeout: float = 2.0) -> None
             proc.wait(timeout=2.0)
         except subprocess.TimeoutExpired:
             pass
+
+
+# -------------------- Python interpreter resolution --------------------
+def resolve_cli_python(override: str | None = None) -> tuple[str, str]:
+    """Pick the Python interpreter to spawn the analysis CLI with.
+
+    Returns (python_path, source) where `source` documents which mechanism
+    selected the interpreter — useful for showing in the UI so the user
+    knows whether the autodetect heuristic kicked in.
+
+    Resolution order:
+      1. Explicit `override` (e.g. from a UI text box).
+      2. `ZJET_CLI_PYTHON` env var.
+      3. `$VIRTUAL_ENV/bin/python` if a venv is active.
+      4. `$CONDA_PREFIX/bin/python` if a conda env is active.
+      5. `sys.executable` (the Python running this Streamlit process).
+
+    The venv/conda-env checks matter on LPC: users frequently activate a
+    site-specific env (e.g. `coffea2025`) for `lpcjobqueue` and then pick
+    up `streamlit` from a different Python, leaving `sys.executable`
+    pointing at the wrong interpreter.
+    """
+    if override:
+        override = override.strip()
+        if override:
+            return override, "explicit override"
+
+    env_override = os.environ.get("ZJET_CLI_PYTHON", "").strip()
+    if env_override:
+        return env_override, "ZJET_CLI_PYTHON env var"
+
+    venv = os.environ.get("VIRTUAL_ENV")
+    if venv:
+        cand = Path(venv) / "bin" / "python"
+        if cand.exists():
+            return str(cand), f"VIRTUAL_ENV ({venv})"
+
+    conda = os.environ.get("CONDA_PREFIX")
+    if conda:
+        cand = Path(conda) / "bin" / "python"
+        if cand.exists():
+            return str(cand), f"CONDA_PREFIX ({conda})"
+
+    return sys.executable, "sys.executable (Streamlit's Python)"
 
 
 # -------------------- Spawn --------------------

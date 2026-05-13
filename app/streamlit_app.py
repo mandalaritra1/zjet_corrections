@@ -76,11 +76,16 @@ def widget_values() -> dict:
 # -------------------- Launch / state --------------------
 def launch_run(cfg: dict) -> None:
     save_config(cfg)
-    cmd = [sys.executable, "-u", str(CLI_SCRIPT), "--config", str(CONFIG_FILE)]
+    python_path, python_src = rc.resolve_cli_python(
+        st.session_state.get("cli_python_override", "")
+    )
+    cmd = [python_path, "-u", str(CLI_SCRIPT), "--config", str(CONFIG_FILE)]
     proc, pgid, master_fd = rc.spawn(cmd, cwd=REPO_ROOT)
     rc.write_pid_file(PID_FILE, proc.pid, pgid)
     state = rc.new_state()
     rc.attach_reader(state, proc, pgid, master_fd)
+    state["python_path"] = python_path
+    state["python_src"] = python_src
     st.session_state.run = state
 
 
@@ -105,6 +110,10 @@ def live_log_fragment() -> None:
     returncode = proc.poll()
 
     elapsed = time.time() - (state["started_at"] or time.time())
+    if state.get("python_path"):
+        st.caption(
+            f"Python: `{state['python_path']}`  ({state.get('python_src', 'unknown source')})"
+        )
     cols = st.columns([2, 1, 1])
     if returncode is None:
         cols[0].info(f"Running — pid {proc.pid}, pgid {state['pgid']}, elapsed {elapsed:.1f}s")
@@ -316,6 +325,21 @@ with tab_run:
     current_cfg = widget_values()
     st.subheader("Current settings")
     st.json(current_cfg, expanded=False)
+
+    with st.expander("Environment (Python interpreter for subprocess)", expanded=False):
+        st.text_input(
+            "Override Python path",
+            key="cli_python_override",
+            placeholder="(leave blank to autodetect VIRTUAL_ENV / CONDA_PREFIX / sys.executable)",
+            help=(
+                "Spawned subprocess Python. Set this if the analysis CLI needs "
+                "a different env than the one Streamlit is running in — e.g. on "
+                "LPC you typically activate `coffea2025` for lpcjobqueue, but "
+                "Streamlit itself may have come from a different Python."
+            ),
+        )
+        resolved, source = rc.resolve_cli_python(st.session_state.get("cli_python_override", ""))
+        st.caption(f"Resolved: `{resolved}`  ({source})")
 
     run_disabled = has_active_run()
     run_clicked = st.button(
